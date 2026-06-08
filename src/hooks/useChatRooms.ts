@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../supabase';
-import { formatTime, requireCurrentUser, showError } from '../lib/supabaseApi';
+import { formatTime, requireCurrentUser } from '../lib/supabaseApi';
 
 export interface ChatRoomPreview {
   id: string;
@@ -66,7 +66,8 @@ export function useChatRooms() {
         };
       }));
     } catch (error) {
-      showError('대화방 불러오기 실패', error);
+      console.warn('[대화방 불러오기 실패]', error);
+      setRooms([]);
     } finally {
       setLoading(false);
     }

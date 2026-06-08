@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Text, Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -9,8 +9,25 @@ import { MessageScreen } from '../screens/MessageScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 
 const Tab = createBottomTabNavigator();
+type TabName = '산책' | '번개' | '코스' | '채팅' | '프로필';
 
 export function RootTabs() {
+  const [refreshKeys, setRefreshKeys] = useState<Record<TabName, number>>({
+    산책: 0,
+    번개: 0,
+    코스: 0,
+    채팅: 0,
+    프로필: 0,
+  });
+
+  const refreshFocusedTab = (name: TabName, navigation: any) => ({
+    tabPress: () => {
+      if (navigation.isFocused()) {
+        setRefreshKeys((prev) => ({ ...prev, [name]: prev[name] + 1 }));
+      }
+    },
+  });
+
   return (
     <NavigationContainer>
       <Tab.Navigator
@@ -43,29 +60,39 @@ export function RootTabs() {
       >
         <Tab.Screen
           name="산책"
-          component={MapScreen}
+          listeners={({ navigation }) => refreshFocusedTab('산책', navigation)}
           options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>🗺️</Text> }}
-        />
+        >
+          {(props) => <MapScreen key={`map-${refreshKeys.산책}`} {...props} />}
+        </Tab.Screen>
         <Tab.Screen
           name="번개"
-          component={LightningScreen}
+          listeners={({ navigation }) => refreshFocusedTab('번개', navigation)}
           options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>⚡</Text> }}
-        />
+        >
+          {(props) => <LightningScreen key={`lightning-${refreshKeys.번개}`} {...props} />}
+        </Tab.Screen>
         <Tab.Screen
           name="코스"
-          component={CourseScreen}
+          listeners={({ navigation }) => refreshFocusedTab('코스', navigation)}
           options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>🐾</Text> }}
-        />
+        >
+          {(props) => <CourseScreen key={`course-${refreshKeys.코스}`} {...props} />}
+        </Tab.Screen>
         <Tab.Screen
           name="채팅"
-          component={MessageScreen}
+          listeners={({ navigation }) => refreshFocusedTab('채팅', navigation)}
           options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>💬</Text> }}
-        />
+        >
+          {(props) => <MessageScreen key={`message-${refreshKeys.채팅}`} {...props} />}
+        </Tab.Screen>
         <Tab.Screen
           name="프로필"
-          component={ProfileScreen}
+          listeners={({ navigation }) => refreshFocusedTab('프로필', navigation)}
           options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>👤</Text> }}
-        />
+        >
+          {(props) => <ProfileScreen key={`profile-${refreshKeys.프로필}`} {...props} />}
+        </Tab.Screen>
       </Tab.Navigator>
     </NavigationContainer>
   );

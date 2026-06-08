@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, Alert, Animated,
   StatusBar, Platform, TextInput, Modal, ScrollView,
-  StyleSheet,
+  StyleSheet, Image,
 } from 'react-native';
 import MapView, { Polyline, Marker, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -12,7 +12,7 @@ import { gradeColor } from '../utils/compatScore';
 import { useNearbyDogs, NearbyDog } from '../hooks/useNearbyDogs';
 import { useWalkLogs } from '../hooks/useWalkLogs';
 import { usePetFacilities, PetFacility } from '../hooks/usePetFacilities';
-import { requireCurrentUser, showError } from '../lib/supabaseApi';
+import { formatDate, requireCurrentUser, showError } from '../lib/supabaseApi';
 import { supabase } from '../../supabase';
 
 interface PathSegment {
@@ -31,7 +31,7 @@ interface SharedPin {
   expiresAt: number;
 }
 
-const QUICK_TAGS = ['똥 조심', '그늘 많음', '물 있음', '경사 있음', '강아지 친화', '주의 필요'];
+const QUICK_TAGS = ['똥 마려움', '똥 조심', '그늘 많음', '물 있음', '경사 있음', '강아지 친화', '주의 필요'];
 
 function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371000;
@@ -167,40 +167,102 @@ function DogDetailModal({
 }) {
   if (!dog) return null;
   const color = gradeColor(dog.grade);
+  const gradeLabel = dog.grade === 'safe' ? '산책 궁합이 좋아요' : dog.grade === 'caution' ? '천천히 인사해요' : '거리 두고 확인해요';
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <View style={ms.pinOverlay}>
-        <View style={ms.detailCard}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-            <View style={[ms.gradeCircle, { backgroundColor: color }]}>
-              <Text style={{ color: T.white, fontSize: 13, fontWeight: '800' }}>{dog.score}%</Text>
+        <View style={ms.jobsCard}>
+          <View style={ms.jobsHandle} />
+          <View style={ms.jobsHeroRow}>
+            <View style={[ms.jobsScoreRing, { borderColor: color }]}>
+              <Text style={[ms.jobsScoreText, { color }]}>{dog.score}</Text>
+              <Text style={ms.jobsScoreUnit}>%</Text>
             </View>
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={ms.detailDogName}>{dog.name}</Text>
-              <Text style={ms.detailOwner}>{dog.ownerNickname} · {dog.breed}</Text>
-              <Text style={[ms.detailGrade, { color }]}>
-                {dog.grade === 'safe' ? '궁합 좋음' : dog.grade === 'caution' ? '보통' : '주의 필요'}
-              </Text>
+            <View style={{ flex: 1 }}>
+              <Text style={ms.jobsEyebrow}>{dog.ownerNickname}님의 산책 파트너</Text>
+              <Text style={ms.jobsTitle}>{dog.name}</Text>
+              <Text style={ms.jobsSubtitle}>{dog.breed} · {dog.weight}kg · {gradeLabel}</Text>
             </View>
           </View>
 
-          <TouchableOpacity style={[ms.detailBtn, { backgroundColor: T.accent }]} onPress={() => { onRequestWalk(dog); onClose(); }}>
-            <Text style={ms.detailBtnText}>🐾 산책 신청하기</Text>
+          <View style={ms.jobsInfoGrid}>
+            <View style={ms.jobsInfoPill}><Text style={ms.jobsInfoLabel}>성향</Text><Text style={ms.jobsInfoValue}>{dog.tendency || '미입력'}</Text></View>
+            <View style={ms.jobsInfoPill}><Text style={ms.jobsInfoLabel}>성별</Text><Text style={ms.jobsInfoValue}>{dog.gender}</Text></View>
+          </View>
+
+          <TouchableOpacity style={ms.jobsPrimaryBtn} onPress={() => { onRequestWalk(dog); onClose(); }}>
+            <Text style={ms.jobsPrimaryText}>산책 신청하기</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[ms.detailBtn, { backgroundColor: '#007AFF' }]} onPress={() => { onChat(dog); onClose(); }}>
-            <Text style={ms.detailBtnText}>💬 대화하기</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[ms.detailBtn, { backgroundColor: T.fill2 }]} onPress={() => { onViewProfile(dog); onClose(); }}>
-            <Text style={[ms.detailBtnText, { color: T.label1 }]}>👤 프로필 보기</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[ms.detailBtn, { backgroundColor: T.fill2 }]} onPress={() => { onAddFriend(dog); onClose(); }}>
-            <Text style={[ms.detailBtnText, { color: T.label1 }]}>➕ 친구 신청</Text>
+          <View style={ms.jobsActionRow}>
+            <TouchableOpacity style={ms.jobsSecondaryBtn} onPress={() => { onChat(dog); onClose(); }}>
+              <Text style={ms.jobsSecondaryText}>대화하기</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={ms.jobsSecondaryBtn} onPress={() => { onViewProfile(dog); onClose(); }}>
+              <Text style={ms.jobsSecondaryText}>프로필 보기</Text>
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity style={ms.jobsGhostBtn} onPress={() => { onAddFriend(dog); onClose(); }}>
+            <Text style={ms.jobsGhostText}>친구 신청</Text>
           </TouchableOpacity>
           <TouchableOpacity style={ms.detailCloseBtn} onPress={onClose}>
             <Text style={{ color: T.label4, fontSize: 14 }}>닫기</Text>
           </TouchableOpacity>
         </View>
       </View>
+    </Modal>
+  );
+}
+
+function PublicProfileModal({
+  visible, dog, profile, dogs, onClose, onAddFriend, onChat,
+}: {
+  visible: boolean;
+  dog: NearbyDog | null;
+  profile: any | null;
+  dogs: any[];
+  onClose: () => void;
+  onAddFriend: (dog: NearbyDog) => void;
+  onChat: (dog: NearbyDog) => void;
+}) {
+  if (!dog) return null;
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <ScrollView style={{ flex: 1, backgroundColor: '#F5F5F7' }} contentContainerStyle={{ paddingBottom: 32 }}>
+        <View style={ms.publicHeader}>
+          <TouchableOpacity onPress={onClose} style={ms.publicCloseBtn}><Text style={{ color: '#007AFF', fontWeight: '700' }}>닫기</Text></TouchableOpacity>
+          <View style={ms.publicAvatarWrap}>
+            {dog.ownerProfileImageUrl
+              ? <Image source={{ uri: dog.ownerProfileImageUrl }} style={ms.publicAvatar} />
+              : <Text style={ms.publicAvatarInitial}>{dog.ownerNickname.slice(0, 1)}</Text>}
+          </View>
+          <Text style={ms.publicName}>{dog.ownerNickname}</Text>
+          <Text style={ms.publicSub}>{profile?.location || '지역 미입력'} · 산책 매칭 {dog.score}%</Text>
+          {!!profile?.bio && <Text style={ms.publicBio}>{profile.bio}</Text>}
+        </View>
+
+        <View style={ms.publicCard}>
+          <Text style={ms.publicSectionTitle}>함께 산책 중인 반려견</Text>
+          {(dogs.length ? dogs : [dog]).map((item: any) => (
+            <View key={item.id} style={ms.publicDogRow}>
+              <View style={ms.publicDogAvatar}>
+                {item.profile_image_url
+                  ? <Image source={{ uri: item.profile_image_url }} style={ms.publicDogImage} />
+                  : <Text style={{ color: T.accent, fontWeight: '900' }}>{String(item.name || dog.name).slice(0, 1)}</Text>}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={ms.publicDogName}>{item.name || dog.name}</Text>
+                <Text style={ms.publicDogMeta}>{item.breed || dog.breed} · {item.weight || dog.weight}kg · {item.tendency || dog.tendency || '성향 미입력'}</Text>
+                {item.birth_date && <Text style={ms.publicDogMeta}>생일 {formatDate(item.birth_date)}</Text>}
+              </View>
+            </View>
+          ))}
+        </View>
+
+        <View style={ms.publicActionWrap}>
+          <TouchableOpacity style={ms.jobsPrimaryBtn} onPress={() => onChat(dog)}><Text style={ms.jobsPrimaryText}>대화하기</Text></TouchableOpacity>
+          <TouchableOpacity style={ms.jobsGhostBtn} onPress={() => onAddFriend(dog)}><Text style={ms.jobsGhostText}>친구 신청하기</Text></TouchableOpacity>
+        </View>
+      </ScrollView>
     </Modal>
   );
 }
@@ -230,6 +292,9 @@ export function MapScreen() {
   const [showDogDetail, setShowDogDetail] = useState(false);
   const [selectedFacility, setSelectedFacility] = useState<PetFacility | null>(null);
   const [showFacilityDetail, setShowFacilityDetail] = useState(false);
+  const [showPublicProfile, setShowPublicProfile] = useState(false);
+  const [publicProfile, setPublicProfile] = useState<any | null>(null);
+  const [publicDogs, setPublicDogs] = useState<any[]>([]);
 
   const lastCoordRef = useRef<{ latitude: number; longitude: number } | null>(null);
   const lastTimestampRef = useRef<number | null>(null);
@@ -241,7 +306,46 @@ export function MapScreen() {
     nearbyDogs, message: nearbyMessage, refresh: refreshDogs,
     publishMyLocation, removeMyLocation,
   } = useNearbyDogs(location, isWalking, selectedDogIds);
-  const { facilities, searchQuery: facilitySearchQuery, setSearchQuery: setFacilitySearchQuery } = usePetFacilities(location, 2);
+  const { facilities, searchQuery: facilitySearchQuery, setSearchQuery: setFacilitySearchQuery } = usePetFacilities(location, 20);
+
+  // ── 산책 신청 실시간 팝업
+  useEffect(() => {
+    let active = true;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    (async () => {
+      try {
+        const user = await requireCurrentUser();
+        if (!active) return;
+        channel = supabase
+          .channel(`walk_requests_${user.id}`)
+          .on('postgres_changes', {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'walk_requests',
+            filter: `receiver_id=eq.${user.id}`,
+          }, async (payload: any) => {
+            const request = payload.new;
+            if (!request || request.status !== 'pending' || new Date(request.expires_at).getTime() < Date.now()) return;
+            const { data: requester } = await supabase.from('users').select('nickname').eq('id', request.requester_id).single();
+            Alert.alert(
+              '산책 신청이 도착했어요',
+              `${requester?.nickname || '주변 산책자'}님이 산책을 신청했습니다.\n매칭률 ${request.matching_score ?? '-'}% · ${request.message || '함께 산책해요.'}`,
+              [
+                { text: '거절', style: 'cancel', onPress: () => supabase.from('walk_requests').update({ status: 'declined' }).eq('id', request.id) },
+                { text: '수락', onPress: () => supabase.from('walk_requests').update({ status: 'accepted' }).eq('id', request.id) },
+              ],
+            );
+          })
+          .subscribe();
+      } catch (_) {}
+    })();
+
+    return () => {
+      active = false;
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, []);
 
   // ── 내 강아지 목록 로드
   useEffect(() => {
@@ -271,6 +375,30 @@ export function MapScreen() {
     publishMyLocation(location, selectedDogIds);
   }, [location, isWalking, selectedDogIds, publishMyLocation]);
 
+  const fetchSharedPins = useCallback(async () => {
+    if (!isWalking) return;
+    try {
+      const { data, error } = await supabase
+        .from('shared_pins')
+        .select('id,latitude,longitude,description,owner_nickname,created_at,expires_at')
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: false })
+        .limit(80);
+      if (error) throw error;
+      setSharedPins((data || []).map((row: any) => ({
+        id: row.id,
+        latitude: Number(row.latitude),
+        longitude: Number(row.longitude),
+        description: row.description,
+        createdAt: new Date(row.created_at).getTime(),
+        expiresAt: new Date(row.expires_at).getTime(),
+        ownerNickname: row.owner_nickname || '산책자',
+      })));
+    } catch (_) {
+      // 공유 마커는 보조 정보이므로 지도 사용을 막지 않습니다.
+    }
+  }, [isWalking]);
+
   // ── 공유 마커 Realtime 구독 (산책 중)
   useEffect(() => {
     if (!isWalking) {
@@ -278,18 +406,18 @@ export function MapScreen() {
         supabase.removeChannel(sharedPinsChannelRef.current);
         sharedPinsChannelRef.current = null;
       }
+      setSharedPins([]);
       return;
     }
 
+    fetchSharedPins();
     const channel = supabase
       .channel('shared_pins_changes')
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
         table: 'shared_pins',
-      }, () => {
-        // 공유 마커 갱신 로직 (선택사항)
-      })
+      }, fetchSharedPins)
       .subscribe();
 
     sharedPinsChannelRef.current = channel;
@@ -297,7 +425,7 @@ export function MapScreen() {
       supabase.removeChannel(channel);
       sharedPinsChannelRef.current = null;
     };
-  }, [isWalking]);
+  }, [isWalking, fetchSharedPins]);
 
   // ── 공유 마커 만료 처리 (30초)
   useEffect(() => {
@@ -336,13 +464,21 @@ export function MapScreen() {
       await supabase.from('messages').insert({
         room_id: room.id,
         sender_id: user.id,
-        content: `${dog.name}와 함께 산책하고 싶어요! 🐾`,
+        content: `${dog.name}와 함께 산책하고 싶어요!`,
       });
-      Alert.alert('신청 완료', '산책 신청 메시지가 전송되었습니다.');
+      await supabase.from('walk_requests').insert({
+        requester_id: user.id,
+        receiver_id: dog.user_id,
+        receiver_dog_id: dog.id,
+        requester_dog_ids: selectedDogIds,
+        matching_score: dog.score,
+        message: `${dog.name}와 함께 산책하고 싶어요.`,
+      });
+      Alert.alert('신청 완료', '상대방에게 산책 신청 알림과 팝업을 보냈습니다.');
     } catch (error) {
       showError('산책 신청 실패', error);
     }
-  }, []);
+  }, [selectedDogIds]);
 
   // ── 대화하기
   const handleChat = useCallback(async (dog: NearbyDog) => {
@@ -375,15 +511,22 @@ export function MapScreen() {
   }, []);
 
   // ── 프로필 보기 (친구 여부 상관없이 공개)
-  const handleViewProfile = useCallback((dog: NearbyDog) => {
-    Alert.alert(
-      `${dog.ownerNickname}님의 프로필`,
-      `반려견: ${dog.name} (${dog.breed})\n궁합 점수: ${dog.score}%\n체중: ${dog.weight}kg\n성향: ${dog.tendency}`,
-      [
-        { text: '닫기', style: 'cancel' },
-        { text: '친구 신청', onPress: () => handleAddFriend(dog) },
-      ],
-    );
+  const handleViewProfile = useCallback(async (dog: NearbyDog) => {
+    setPublicProfile(null);
+    setPublicDogs([]);
+    setSelectedDog(dog);
+    setShowPublicProfile(true);
+    try {
+      const [{ data: profileData }, { data: dogsData }] = await Promise.all([
+        supabase.from('users').select('id,nickname,profile_image_url,bio,location').eq('id', dog.user_id).single(),
+        supabase.from('dogs').select('id,name,breed,weight,birth_date,gender,tendency,profile_image_url').eq('user_id', dog.user_id),
+      ]);
+      setPublicProfile(profileData || null);
+      setPublicDogs(dogsData || []);
+    } catch (_) {
+      setPublicProfile(null);
+      setPublicDogs([]);
+    }
   }, []);
 
   // ── 친구 신청
@@ -415,19 +558,35 @@ export function MapScreen() {
     try {
       const user = await requireCurrentUser();
       const { data: userData } = await supabase.from('users').select('nickname').eq('id', user.id).single();
+      const now = Date.now();
+      const expiresAt = new Date(now + 30_000).toISOString();
+      const { data, error } = await supabase
+        .from('shared_pins')
+        .insert({
+          user_id: user.id,
+          latitude: location.latitude,
+          longitude: location.longitude,
+          description: desc,
+          owner_nickname: userData?.nickname || '나',
+          expires_at: expiresAt,
+        })
+        .select('id,created_at')
+        .single();
+      if (error) throw error;
       const pin: SharedPin = {
-        id: Date.now().toString(),
+        id: data?.id || now.toString(),
         latitude: location.latitude,
         longitude: location.longitude,
         description: desc,
-        createdAt: Date.now(),
-        expiresAt: Date.now() + 30_000,
+        createdAt: data?.created_at ? new Date(data.created_at).getTime() : now,
+        expiresAt: new Date(expiresAt).getTime(),
         ownerNickname: userData?.nickname || '나',
       };
-      setSharedPins((prev) => [...prev, pin]);
+      setSharedPins((prev) => [pin, ...prev.filter((item) => item.id !== pin.id)]);
       setShowPinModal(false);
-    } catch (_) {
+    } catch (error) {
       setShowPinModal(false);
+      showError('장소 공유 실패', error);
     }
   }, [location]);
 
@@ -741,6 +900,16 @@ export function MapScreen() {
         onAddFriend={handleAddFriend}
       />
 
+      <PublicProfileModal
+        visible={showPublicProfile}
+        dog={selectedDog}
+        profile={publicProfile}
+        dogs={publicDogs}
+        onClose={() => setShowPublicProfile(false)}
+        onAddFriend={handleAddFriend}
+        onChat={handleChat}
+      />
+
       {/* 문화시설 상세 정보 모달 */}
       <Modal visible={showFacilityDetail} animationType="fade" transparent onRequestClose={() => setShowFacilityDetail(false)}>
         <View style={ms.pinOverlay}>
@@ -878,6 +1047,51 @@ const ms = StyleSheet.create({
   },
   detailBtnText: { color: T.white, fontSize: 15, fontWeight: '700' },
   detailCloseBtn: { alignItems: 'center', paddingVertical: 8 },
+
+  jobsCard: {
+    backgroundColor: T.white,
+    borderRadius: 28,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 8,
+  },
+  jobsHandle: { width: 44, height: 5, borderRadius: 3, backgroundColor: '#D1D1D6', alignSelf: 'center', marginBottom: 18 },
+  jobsHeroRow: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 16 },
+  jobsScoreRing: { width: 72, height: 72, borderRadius: 36, borderWidth: 4, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFFFFF' },
+  jobsScoreText: { fontSize: 24, fontWeight: '900', letterSpacing: -1 },
+  jobsScoreUnit: { fontSize: 10, color: T.label4, fontWeight: '800', marginTop: -4 },
+  jobsEyebrow: { fontSize: 12, color: T.label4, fontWeight: '700', marginBottom: 4 },
+  jobsTitle: { fontSize: 26, fontWeight: '900', color: T.label1, letterSpacing: -0.8 },
+  jobsSubtitle: { fontSize: 13, color: T.label3, marginTop: 4, lineHeight: 18 },
+  jobsInfoGrid: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  jobsInfoPill: { flex: 1, backgroundColor: '#F5F5F7', borderRadius: 16, padding: 12 },
+  jobsInfoLabel: { fontSize: 11, color: T.label4, fontWeight: '700', marginBottom: 4 },
+  jobsInfoValue: { fontSize: 13, color: T.label1, fontWeight: '800' },
+  jobsPrimaryBtn: { backgroundColor: '#1C1C1E', paddingVertical: 15, borderRadius: 18, alignItems: 'center', marginBottom: 10 },
+  jobsPrimaryText: { color: T.white, fontSize: 15, fontWeight: '900' },
+  jobsActionRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
+  jobsSecondaryBtn: { flex: 1, backgroundColor: '#F2F2F7', paddingVertical: 14, borderRadius: 16, alignItems: 'center' },
+  jobsSecondaryText: { color: '#1C1C1E', fontSize: 14, fontWeight: '800' },
+  jobsGhostBtn: { backgroundColor: '#FFF8F0', paddingVertical: 14, borderRadius: 16, alignItems: 'center', marginBottom: 4 },
+  jobsGhostText: { color: T.accent, fontSize: 14, fontWeight: '900' },
+  publicHeader: { backgroundColor: '#FFFFFF', paddingTop: 18, paddingHorizontal: 20, paddingBottom: 24, alignItems: 'center', borderBottomLeftRadius: 28, borderBottomRightRadius: 28 },
+  publicCloseBtn: { alignSelf: 'flex-end', paddingVertical: 6, paddingHorizontal: 4 },
+  publicAvatarWrap: { width: 96, height: 96, borderRadius: 48, backgroundColor: '#FFF3E0', alignItems: 'center', justifyContent: 'center', marginTop: 4, marginBottom: 12, overflow: 'hidden' },
+  publicAvatar: { width: 96, height: 96, borderRadius: 48 },
+  publicAvatarInitial: { fontSize: 36, fontWeight: '900', color: T.accent },
+  publicName: { fontSize: 28, fontWeight: '900', color: T.label1, letterSpacing: -0.8 },
+  publicSub: { fontSize: 13, color: T.label4, marginTop: 6, fontWeight: '700' },
+  publicBio: { fontSize: 14, color: T.label2, marginTop: 12, textAlign: 'center', lineHeight: 20 },
+  publicCard: { margin: 16, backgroundColor: '#FFFFFF', borderRadius: 22, padding: 16 },
+  publicSectionTitle: { fontSize: 17, fontWeight: '900', color: T.label1, marginBottom: 12 },
+  publicDogRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: '#E5E5EA' },
+  publicDogAvatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#FFF8F0', alignItems: 'center', justifyContent: 'center', marginRight: 12, overflow: 'hidden' },
+  publicDogImage: { width: 46, height: 46, borderRadius: 23 },
+  publicDogName: { fontSize: 16, fontWeight: '900', color: T.label1 },
+  publicDogMeta: { fontSize: 12, color: T.label4, marginTop: 3 },
+  publicActionWrap: { paddingHorizontal: 16 },
 
   pinFab: {
     position: 'absolute',

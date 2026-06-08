@@ -1,12 +1,14 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   ScrollView, View, Text, TouchableOpacity,
   StyleSheet, Modal, TextInput, ActivityIndicator,
   RefreshControl, Alert, Platform,
 } from 'react-native';
 import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
+import * as Location from 'expo-location';
 import { LightningWalk, useLightningWalks } from '../hooks/useLightningWalks';
 import { useWalkLogs } from '../hooks/useWalkLogs';
+import { useDogs, DogRecord } from '../hooks/useDogs';
 import { T } from '../styles/styles';
 
 function getDaysInMonth(year: number, month: number) { return new Date(year, month + 1, 0).getDate(); }
@@ -20,13 +22,14 @@ const MONTH_NAMES = ['1월','2월','3월','4월','5월','6월','7월','8월','9�
 
 // ── 번개 만들기 모달 (네이버 지도 API 연동)
 function CreateLightningModal({
-  visible, selectedDate, onClose, onSubmit, userLocation,
+  visible, selectedDate, onClose, onSubmit, userLocation, dogs,
 }: {
   visible: boolean;
   selectedDate: string | null;
   onClose: () => void;
   onSubmit: (input: any) => Promise<boolean>;
   userLocation: string | null;
+  dogs: DogRecord[];
 }) {
   const today = new Date().toISOString().slice(0, 10);
   const [title, setTitle] = useState('');
@@ -39,16 +42,40 @@ function CreateLightningModal({
   const [showMapPicker, setShowMapPicker] = useState(false);
   const [pinCoord, setPinCoord] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locationName, setLocationName] = useState('');
+  const [selectedDogIds, setSelectedDogIds] = useState<string[]>([]);
+  const mapRef = useRef<MapView | null>(null);
 
   const reset = () => {
     setTitle(''); setLocation(''); setDate(selectedDate || today);
     setTime('18:30'); setMaxParticipants('4'); setPinCoord(null);
-    setRegion(userLocation || ''); setLocationName('');
+    setRegion(userLocation || ''); setLocationName(''); setSelectedDogIds([]);
+  };
+
+
+  const toggleDog = (id: string) => {
+    setSelectedDogIds((prev) => prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]);
+  };
+
+  const moveToMyLocation = async () => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('위치 권한 필요', '현재 위치로 이동하려면 위치 권한이 필요합니다.');
+      return;
+    }
+    const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+    const coord = { latitude: current.coords.latitude, longitude: current.coords.longitude };
+    setPinCoord(coord);
+    setLocationName(`${coord.latitude.toFixed(4)}, ${coord.longitude.toFixed(4)}`);
+    mapRef.current?.animateToRegion({ ...coord, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 450);
   };
 
   const handleSave = async () => {
     if (!title.trim() || !location.trim() || !date || !time) {
       Alert.alert('입력 확인', '제목, 장소, 날짜, 시간을 모두 입력해 주세요.');
+      return;
+    }
+    if (!selectedDogIds.length) {
+      Alert.alert('반려견 선택', '번개에 함께 갈 반려견을 선택해 주세요.');
       return;
     }
     setSaving(true);
@@ -61,6 +88,7 @@ function CreateLightningModal({
       locationLat: pinCoord?.latitude ?? null,
       locationLng: pinCoord?.longitude ?? null,
       region: region.trim() || userLocation || null,
+      selectedDogIds,
     });
     setSaving(false);
     if (ok) { reset(); onClose(); }
@@ -94,6 +122,24 @@ function CreateLightningModal({
             </Text>
           </TouchableOpacity>
 
+          <Text style={s.inputLabel}>함께 갈 반려견</Text>
+          <View style={s.dogSelectWrap}>
+            {dogs.length === 0 ? (
+              <Text style={s.dogSelectEmpty}>프로필 탭에서 반려견을 먼저 등록해 주세요.</Text>
+            ) : dogs.map((dog) => {
+              const selected = selectedDogIds.includes(dog.id);
+              return (
+                <TouchableOpacity
+                  key={dog.id}
+                  style={[s.dogChip, selected && s.dogChipSelected]}
+                  onPress={() => toggleDog(dog.id)}
+                >
+                  <Text style={[s.dogChipText, selected && s.dogChipTextSelected]}>{dog.name}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
           <Text style={s.inputLabel}>날짜</Text>
           <TextInput style={s.input} value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" placeholderTextColor="#C7C7CC" />
 
@@ -116,16 +162,19 @@ function CreateLightningModal({
       <Modal visible={showMapPicker} animationType="slide" onRequestClose={() => setShowMapPicker(false)}>
         <View style={{ flex: 1 }}>
           <View style={s.mapPickerHeader}>
-            <TouchableOpacity onPress={() => setShowMapPicker(false)}>
+            <TouchableOpacity onPress={() => setShowMapPicker(false)} style={s.mapPickerHeaderButton}>
               <Text style={s.modalCancel}>취소</Text>
             </TouchableOpacity>
-            <Text style={s.modalTitle}>위치 선택</Text>
-            <TouchableOpacity onPress={() => setShowMapPicker(false)}>
+            <TouchableOpacity onPress={moveToMyLocation} style={s.myLocationBtn}>
+              <Text style={s.myLocationBtnText}>내 현재 위치</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowMapPicker(false)} style={s.mapPickerHeaderButton}>
               <Text style={s.modalSave}>확인</Text>
             </TouchableOpacity>
           </View>
           <Text style={s.mapPickerHint}>지도를 길게 눌러 정확한 위치를 설정해 주세요.</Text>
           <MapView
+            ref={mapRef}
             style={{ flex: 1 }}
             provider={PROVIDER_DEFAULT}
             initialRegion={{ latitude: 37.5665, longitude: 126.9780, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
@@ -250,9 +299,34 @@ function EventCard({ event, onToggle }: { event: LightningWalk; onToggle: (event
         </View>
       )}
 
+      {event.matchScore !== null && (
+        <View style={[s.matchBox, event.matchGrade === 'safe' ? s.matchSafe : event.matchGrade === 'caution' ? s.matchCaution : s.matchDanger]}>
+          <Text style={s.matchLabel}>우리 강아지와 이 번개의 매칭률</Text>
+          <Text style={s.matchScore}>{event.matchScore}%</Text>
+        </View>
+      )}
+
       <View style={s.summaryBox}>
         <Text style={s.summaryText}>{event.ai_summary || '참여자 정보가 쌓이면 산책 브리핑을 확인할 수 있습니다.'}</Text>
       </View>
+
+      {event.participants.length > 0 && (
+        <View style={s.participantSection}>
+          <Text style={s.participantSectionTitle}>참여 반려인과 반려견</Text>
+          {event.participants.map((participant) => (
+            <View key={participant.user_id} style={s.participantRow}>
+              <View style={s.participantAvatar}><Text style={s.participantInitial}>{participant.nickname.slice(0, 1)}</Text></View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.participantName}>{participant.nickname}</Text>
+                <Text style={s.participantDogs}>
+                  {participant.dogs.length ? participant.dogs.map((dog) => `${dog.name}${dog.breed ? ` (${dog.breed})` : ''}`).join(', ') : '선택된 반려견 정보 없음'}
+                </Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
+
       <View style={s.eventBottom}>
         <Text style={s.weatherText}>{event.weather || '날씨 확인 필요'}</Text>
         <TouchableOpacity
@@ -279,6 +353,7 @@ export function LightningScreen() {
 
   const lightning = useLightningWalks();
   const walkLogs = useWalkLogs();
+  const { dogs } = useDogs();
 
   const daysInMonth = getDaysInMonth(year, month);
   const firstDay = getFirstDayOfWeek(year, month);
@@ -293,6 +368,26 @@ export function LightningScreen() {
 
   const cells: (number | null)[] = [...Array(firstDay).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
   const refresh = async () => { await lightning.refresh(); await walkLogs.refresh(); };
+
+  const handleToggleJoin = useCallback((event: LightningWalk) => {
+    if (event.joined) {
+      lightning.toggleJoin(event);
+      return;
+    }
+    if (!dogs.length) {
+      Alert.alert('반려견 등록 필요', '번개에 참여하려면 프로필 탭에서 반려견을 먼저 등록해 주세요.');
+      return;
+    }
+    const firstDogId = dogs[0].id;
+    Alert.alert(
+      '번개 참여',
+      `${dogs[0].name}와 함께 이 번개에 참여할까요? 여러 마리를 선택하려면 번개 생성 화면과 동일한 선택 UI를 사용할 수 있도록 확장 가능합니다.`,
+      [
+        { text: '취소', style: 'cancel' },
+        { text: '참여', onPress: () => lightning.toggleJoin(event, [firstDogId]) },
+      ],
+    );
+  }, [dogs, lightning]);
 
   const prevMonth = () => { month === 0 ? (setYear((y) => y - 1), setMonth(11)) : setMonth((m) => m - 1); setSelectedDate(null); };
   const nextMonth = () => { month === 11 ? (setYear((y) => y + 1), setMonth(0)) : setMonth((m) => m + 1); setSelectedDate(null); };
@@ -336,6 +431,7 @@ export function LightningScreen() {
               const key = toKey(year, month, day);
               const walkMark = walkLogs.markedDates[key];
               const lightningCount = lightning.dateCountMap[key] || 0;
+              const joinedLightningCount = lightning.joinedDateCountMap[key] || 0;
               const isSelected = key === selectedDate;
               const dayOfWeek = (firstDay + day - 1) % 7;
               const future = isFuture(key);
@@ -363,6 +459,12 @@ export function LightningScreen() {
                       <Text style={s.countBadgeText}>{lightningCount}</Text>
                     </View>
                   )}
+
+                  {future && joinedLightningCount > 0 && !isSelected && (
+                    <View style={s.joinedBadge}>
+                      <Text style={s.joinedBadgeText}>{joinedLightningCount}</Text>
+                    </View>
+                  )}
                 </TouchableOpacity>
               );
             })}
@@ -370,6 +472,7 @@ export function LightningScreen() {
           <View style={s.legend}>
             <View style={s.legendItem}><View style={[s.legendDot, { backgroundColor: T.accent }]} /><Text style={s.legendText}>산책 완료</Text></View>
             <View style={s.legendItem}><View style={[s.legendDot, { backgroundColor: '#FF9F0A', borderRadius: 3 }]} /><Text style={s.legendText}>번개 수</Text></View>
+            <View style={s.legendItem}><View style={[s.legendDot, { backgroundColor: T.blue }]} /><Text style={s.legendText}>내가 참여한 번개</Text></View>
           </View>
         </View>
 
@@ -382,7 +485,7 @@ export function LightningScreen() {
               <>
                 <Text style={s.subSectionTitle}>✅ 내가 참여하는 번개</Text>
                 {selectedJoinedWalks.map((event) => (
-                  <EventCard key={event.id} event={event} onToggle={lightning.toggleJoin} />
+                  <EventCard key={event.id} event={event} onToggle={handleToggleJoin} />
                 ))}
               </>
             )}
@@ -391,7 +494,7 @@ export function LightningScreen() {
               <>
                 <Text style={s.subSectionTitle}>⚡ 올라온 번개</Text>
                 {selectedOtherWalks.map((event) => (
-                  <EventCard key={event.id} event={event} onToggle={lightning.toggleJoin} />
+                  <EventCard key={event.id} event={event} onToggle={handleToggleJoin} />
                 ))}
               </>
             )}
@@ -409,7 +512,7 @@ export function LightningScreen() {
             {lightning.loading
               ? <ActivityIndicator color={T.accent} />
               : lightning.walks.length
-                ? lightning.walks.map((event) => <EventCard key={event.id} event={event} onToggle={lightning.toggleJoin} />)
+                ? lightning.walks.map((event) => <EventCard key={event.id} event={event} onToggle={handleToggleJoin} />)
                 : <EmptyText text="현재 지역에 등록된 번개가 없습니다." />
             }
           </View>
@@ -428,6 +531,7 @@ export function LightningScreen() {
         onClose={() => setShowCreateModal(false)}
         onSubmit={lightning.createWalk}
         userLocation={lightning.userLocation}
+        dogs={dogs}
       />
 
       {/* 지역 필터 모달 */}
@@ -640,4 +744,47 @@ const s = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: T.fill2,
   },
+  joinedBadge: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    backgroundColor: T.blue,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  joinedBadgeText: { fontSize: 8, fontWeight: '800', color: T.white },
+  matchBox: {
+    marginTop: 10,
+    marginBottom: 10,
+    borderRadius: 16,
+    padding: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  matchSafe: { backgroundColor: '#E9FBEF' },
+  matchCaution: { backgroundColor: '#FFF6E5' },
+  matchDanger: { backgroundColor: '#FFEEEE' },
+  matchLabel: { fontSize: 13, color: T.label2, fontWeight: '700', flex: 1 },
+  matchScore: { fontSize: 22, color: T.label1, fontWeight: '900' },
+  participantSection: { backgroundColor: '#F5F5F7', borderRadius: 14, padding: 12, marginBottom: 10 },
+  participantSectionTitle: { fontSize: 13, fontWeight: '800', color: T.label1, marginBottom: 8 },
+  participantRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
+  participantAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#FFF3E0', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
+  participantInitial: { color: T.accent, fontWeight: '900' },
+  participantName: { fontSize: 13, color: T.label1, fontWeight: '800' },
+  participantDogs: { fontSize: 12, color: T.label4, marginTop: 2 },
+  dogSelectWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, backgroundColor: T.white, borderRadius: 12, padding: 10 },
+  dogSelectEmpty: { color: T.label4, fontSize: 13, paddingVertical: 4 },
+  dogChip: { borderWidth: 1.5, borderColor: T.fill2, borderRadius: 18, paddingHorizontal: 13, paddingVertical: 9, backgroundColor: '#FFFFFF' },
+  dogChipSelected: { borderColor: T.accent, backgroundColor: '#FFF8F0' },
+  dogChipText: { color: T.label3, fontSize: 13, fontWeight: '700' },
+  dogChipTextSelected: { color: T.accent },
+  mapPickerHeaderButton: { minWidth: 64, alignItems: 'center', paddingVertical: 8 },
+  myLocationBtn: { backgroundColor: '#FFF8F0', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: '#FFE0B2' },
+  myLocationBtnText: { color: T.accent, fontSize: 13, fontWeight: '800' },
+
 });

@@ -9,14 +9,13 @@ import { useUserProfile, type UserProfileEdit } from '../hooks/useUserProfile';
 import { useAlbums, type AlbumItem } from '../hooks/useAlbums';
 import { useDogForm } from '../hooks/useDogForm';
 import { useFriends } from '../hooks/useFriends';
-import { useLightningWalks } from '../hooks/useLightningWalks';
+import { usePosts } from '../hooks/usePosts';
 
 import { UserProfileHeader } from './profile/UserProfileHeader';
 import { DogList } from './profile/DogList';
 import { AlbumGrid } from './profile/AlbumGrid';
 
 import { FriendListModal } from './profile/modals/FriendListModal';
-import { GroupListModal } from './profile/modals/GroupListModal';
 import { DogRegisterModal } from './profile/modals/DogRegisterModal';
 import { DogEditModal } from './profile/modals/DogEditModal';
 import { UserProfileEditModal } from './profile/modals/UserProfileEditModal';
@@ -29,13 +28,12 @@ export function ProfileScreen() {
   const { dogs, fetching, insertDog, updateDog, deleteDog } = useDogs();
   const { nickname, genderForAvatar, profileImageUrl, location, bio, loadEditDefaults, updateProfile, updateProfileImage } = useUserProfile();
   const albumsCtx = useAlbums();
-  const { friends } = useFriends();
-  const { walks: joinedWalks } = useLightningWalks(true);
+  const { friends, sentRequests, receivedRequests, acceptRequest, rejectRequest, cancelRequest } = useFriends();
+  const { myPosts } = usePosts();
 
   // 모달 표시 플래그
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
   const [isFriendModalOpen, setIsFriendModalOpen] = useState(false);
-  const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [isEditDogModalOpen, setIsEditDogModalOpen] = useState(false);
   const [isEditUserProfileOpen, setIsEditUserProfileOpen] = useState(false);
   const [isAddAlbumModalOpen, setIsAddAlbumModalOpen] = useState(false);
@@ -178,12 +176,11 @@ export function ProfileScreen() {
         userNickname={nickname}
         albumsCount={albumsCtx.albums.length}
         friendsCount={friends.length}
-        groupsCount={joinedWalks.length}
+        coursesCount={myPosts.length}
         userLocation={location}
         userBio={bio}
         onPickAvatar={() => pickImageFor('user')}
         onOpenFriendModal={() => setIsFriendModalOpen(true)}
-        onOpenGroupModal={() => setIsGroupModalOpen(true)}
         onOpenEditProfile={openEditUserProfile}
       />
 
@@ -206,8 +203,16 @@ export function ProfileScreen() {
         onDeleteSelected={albumsCtx.deleteSelected}
       />
 
-      <FriendListModal visible={isFriendModalOpen} onClose={() => setIsFriendModalOpen(false)} friends={friends} />
-      <GroupListModal visible={isGroupModalOpen} onClose={() => setIsGroupModalOpen(false)} groups={joinedWalks} />
+      <FriendListModal
+        visible={isFriendModalOpen}
+        onClose={() => setIsFriendModalOpen(false)}
+        friends={friends}
+        sentRequests={sentRequests}
+        receivedRequests={receivedRequests}
+        onAccept={acceptRequest}
+        onReject={rejectRequest}
+        onCancel={cancelRequest}
+      />
 
       <AlbumAddModal
         visible={isAddAlbumModalOpen}

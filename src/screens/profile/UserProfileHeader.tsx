@@ -12,17 +12,16 @@ interface Props {
   userBio: string;
   albumsCount: number;
   friendsCount: number;
-  groupsCount: number;
+  coursesCount: number;
   onPickAvatar: () => void;
   onOpenFriendModal: () => void;
-  onOpenGroupModal: () => void;
   onOpenEditProfile: () => void;
 }
 
 function UserProfileHeaderInner({
   userAvatar, userGenderForAvatar, userNickname, userLocation, userBio,
-  albumsCount, friendsCount, groupsCount,
-  onPickAvatar, onOpenFriendModal, onOpenGroupModal, onOpenEditProfile,
+  albumsCount, friendsCount, coursesCount,
+  onPickAvatar, onOpenFriendModal, onOpenEditProfile,
 }: Props) {
   const headline =
     [userLocation, userBio].filter(Boolean).join(' · ') ||
@@ -31,7 +30,6 @@ function UserProfileHeaderInner({
   return (
     <View style={styles.instaProfileHeaderCard}>
       <View style={styles.instaHeaderTopRow}>
-        {/* 아바타 — + 배지 없이 터치만으로 사진 변경 */}
         <TouchableOpacity
           style={styles.avatarWrapper}
           onPress={onPickAvatar}
@@ -44,7 +42,6 @@ function UserProfileHeaderInner({
           </View>
         </TouchableOpacity>
 
-        {/* 통계 */}
         <View style={styles.instaStatsContainer}>
           <View style={styles.instaStatItem}>
             <Text style={styles.instaStatNumber}>{albumsCount}</Text>
@@ -54,20 +51,18 @@ function UserProfileHeaderInner({
             <Text style={styles.instaStatNumber}>{friendsCount}</Text>
             <Text style={styles.instaStatLabel}>친구</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.instaStatItem} onPress={onOpenGroupModal}>
-            <Text style={styles.instaStatNumber}>{groupsCount}</Text>
-            <Text style={styles.instaStatLabel}>모임</Text>
-          </TouchableOpacity>
+          <View style={styles.instaStatItem}>
+            <Text style={styles.instaStatNumber}>{coursesCount}</Text>
+            <Text style={styles.instaStatLabel}>내 코스</Text>
+          </View>
         </View>
       </View>
 
-      {/* 닉네임 / 소개 */}
       <View style={styles.instaProfileBioWrapper}>
         <Text style={styles.userHeadline}>{userNickname}</Text>
         <Text style={styles.userSubline}>{headline}</Text>
       </View>
 
-      {/* 프로필 수정 */}
       <TouchableOpacity
         style={[styles.appleSecondaryButton, { backgroundColor: '#F2F2F7', marginTop: 10 }]}
         onPress={onOpenEditProfile}
@@ -76,7 +71,6 @@ function UserProfileHeaderInner({
         <Text style={{ color: '#007AFF', fontSize: 14, fontWeight: '600' }}>프로필 수정</Text>
       </TouchableOpacity>
 
-      {/* 로그아웃 */}
       <TouchableOpacity
         style={styles.appleSecondaryButton}
         onPress={async () => await supabase.auth.signOut()}

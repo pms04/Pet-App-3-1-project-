@@ -2,6 +2,27 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert } from 'react-native';
 import { supabase } from '../../supabase';
 import { formatDateTimeLabel, requireCurrentUser, showError } from '../lib/supabaseApi';
+import { getEnergyByBreed } from '../constants/breedEnergy';
+import { calcCompatScore, DogProfile } from '../utils/compatScore';
+
+export interface LightningParticipantDog {
+  id: string;
+  name: string;
+  breed: string | null;
+  weight: number | null;
+  birth_date: string | null;
+  gender: string | null;
+  tendency: string | null;
+  user_id: string;
+}
+
+export interface LightningParticipant {
+  user_id: string;
+  nickname: string;
+  profileImageUrl: string | null;
+  selectedDogIds: string[];
+  dogs: LightningParticipantDog[];
+}
 
 export interface LightningWalk {
   id: string;
@@ -20,7 +41,12 @@ export interface LightningWalk {
   startsAtLabel: string;
   currentParticipants: number;
   maxParticipants: number;
-  region: string | null;  // 지역 태그
+  region: string | null;
+  participants: LightningParticipant[];
+  participantDogs: LightningParticipantDog[];
+  mySelectedDogIds: string[];
+  matchScore: number | null;
+  matchGrade: 'safe' | 'caution' | 'danger' | null;
 }
 
 export interface CreateLightningInput {
@@ -32,6 +58,7 @@ export interface CreateLightningInput {
   time: string;
   maxParticipants: string;
   region?: string;
+  selectedDogIds?: string[];
 }
 
 function dateKey(value: string) {
@@ -42,14 +69,50 @@ function buildAiSummary(title: string, location: string) {
   return `${location}에서 진행되는 "${title}" 번개입니다. 참여 전 반려견 성향과 리드줄 준비 상태를 확인해 주세요.`;
 }
 
+function toAgeMonths(birthDate?: string | null) {
+  if (!birthDate) return 36;
+  const birth = new Date(birthDate);
+  if (Number.isNaN(birth.getTime())) return 36;
+  const now = new Date();
+  return Math.max(1, (now.getFullYear() - birth.getFullYear()) * 12 + now.getMonth() - birth.getMonth());
+}
+
+function toActivityLevel(breed?: string | null): 1 | 2 | 3 | 4 | 5 {
+  const energy = getEnergyByBreed(breed || '')?.energy_level ?? 0.6;
+  return Math.min(5, Math.max(1, Math.round(energy * 5))) as 1 | 2 | 3 | 4 | 5;
+}
+
+function toProfile(row: Partial<LightningParticipantDog> | any): DogProfile {
+  const genderValue = String(row.gender || 'M');
+  return {
+    weightKg: Number(row.weight || 1),
+    activityLevel: toActivityLevel(row.breed),
+    ageMonths: toAgeMonths(row.birth_date),
+    isNeutered: genderValue.includes('N'),
+    gender: genderValue.startsWith('F') ? 'F' : 'M',
+  };
+}
+
+function computeWalkMatch(myDogs: LightningParticipantDog[], otherDogs: LightningParticipantDog[]) {
+  if (!myDogs.length || !otherDogs.length) return { score: null, grade: null };
+  const scores: { score: number; grade: 'safe' | 'caution' | 'danger' }[] = [];
+  for (const myDog of myDogs) {
+    for (const dog of otherDogs) {
+      scores.push(calcCompatScore(toProfile(myDog), toProfile(dog)));
+    }
+  }
+  if (!scores.length) return { score: null, grade: null };
+  const score = Math.round(scores.reduce((sum, item) => sum + item.score, 0) / scores.length);
+  const grade = score >= 70 ? 'safe' : score >= 40 ? 'caution' : 'danger';
+  return { score, grade };
+}
+
 export function useLightningWalks(joinedOnly = false) {
   const [walks, setWalks] = useState<LightningWalk[]>([]);
   const [loading, setLoading] = useState(true);
-  // 사용자 선택 지역 필터 (null = 거주지 기반)
   const [regionFilter, setRegionFilter] = useState<string | null>(null);
   const [userLocation, setUserLocation] = useState<string | null>(null);
 
-  // 사용자 거주지 로드
   useEffect(() => {
     (async () => {
       try {
@@ -64,20 +127,54 @@ export function useLightningWalks(joinedOnly = false) {
     setLoading(true);
     try {
       const user = await requireCurrentUser();
-      // 현재 시각 이후의 번개만 (만료된 것은 자동 제외)
       const now = new Date().toISOString();
       const { data, error } = await supabase
         .from('lightning_walks')
-        .select('id,user_id,title,location,location_lat,location_lng,starts_at,max_participants,ai_summary,weather,created_at,region,lightning_participants(user_id)')
+        .select('id,user_id,title,location,location_lat,location_lng,starts_at,max_participants,ai_summary,weather,created_at,region,lightning_participants(user_id,selected_dog_ids)')
         .gte('starts_at', now)
         .order('starts_at', { ascending: true });
       if (error) throw error;
 
-      const mapped = (data || []).map((row: any) => {
-        const participants = row.lightning_participants || [];
-        const participantCount = participants.length;
+      const rows = data || [];
+      const participantUserIds = Array.from(new Set(rows.flatMap((row: any) => (row.lightning_participants || []).map((p: any) => p.user_id))));
+      const participantDogIds = Array.from(new Set(rows.flatMap((row: any) => (row.lightning_participants || []).flatMap((p: any) => p.selected_dog_ids || []))));
+
+      const [{ data: usersData }, { data: dogsData }] = await Promise.all([
+        participantUserIds.length
+          ? supabase.from('users').select('id,nickname,profile_image_url').in('id', participantUserIds)
+          : Promise.resolve({ data: [] as any[] }),
+        participantDogIds.length
+          ? supabase.from('dogs').select('id,user_id,name,breed,weight,birth_date,gender,tendency').in('id', participantDogIds)
+          : Promise.resolve({ data: [] as any[] }),
+      ]);
+      const usersById = Object.fromEntries((usersData || []).map((profile: any) => [profile.id, profile]));
+      const dogsById = Object.fromEntries((dogsData || []).map((dog: any) => [dog.id, dog]));
+
+      const mapped = rows.map((row: any) => {
+        const participantsRaw = row.lightning_participants || [];
+        const participantCount = participantsRaw.length;
         const maxParticipants = row.max_participants || 4;
-        const joined = participants.some((p: any) => p.user_id === user.id);
+        const joinedParticipant = participantsRaw.find((p: any) => p.user_id === user.id);
+        const joined = Boolean(joinedParticipant);
+        const participants = participantsRaw.map((participant: any) => {
+          const selectedDogIds = participant.selected_dog_ids || [];
+          const profile = usersById[participant.user_id] || {};
+          return {
+            user_id: participant.user_id,
+            nickname: profile.nickname || 'WalkFix 사용자',
+            profileImageUrl: profile.profile_image_url || null,
+            selectedDogIds,
+            dogs: selectedDogIds.map((id: string) => dogsById[id]).filter(Boolean),
+          } as LightningParticipant;
+        });
+        const mySelectedDogIds = joinedParticipant?.selected_dog_ids || [];
+        const myDogs = mySelectedDogIds.map((id: string) => dogsById[id]).filter(Boolean);
+        const otherDogs = participants
+          .filter((participant) => participant.user_id !== user.id)
+          .flatMap((participant) => participant.dogs);
+        const match = computeWalkMatch(myDogs, otherDogs);
+        const participantDogs = participants.flatMap((participant) => participant.dogs);
+
         return {
           id: row.id,
           user_id: row.user_id,
@@ -96,10 +193,14 @@ export function useLightningWalks(joinedOnly = false) {
           currentParticipants: participantCount,
           maxParticipants,
           region: row.region ?? null,
+          participants,
+          participantDogs,
+          mySelectedDogIds,
+          matchScore: match.score,
+          matchGrade: match.grade,
         } as LightningWalk;
       });
 
-      // 지역 필터 적용 (거주지 + 선택 지역 모두 표시)
       let filtered = mapped;
       const regions: Set<string> = new Set();
       if (userLocation) regions.add(userLocation);
@@ -107,7 +208,7 @@ export function useLightningWalks(joinedOnly = false) {
 
       if (regions.size > 0) {
         filtered = mapped.filter((w) => {
-          if (!w.region) return true; // 지역 미설정 번개는 모두 표시
+          if (!w.region) return true;
           for (const region of regions) {
             if (w.region.includes(region) || region.includes(w.region)) return true;
           }
@@ -125,25 +226,19 @@ export function useLightningWalks(joinedOnly = false) {
 
   useEffect(() => { fetchWalks(); }, [fetchWalks]);
 
-  // 달력 마킹: 내가 참여한 날 = 파랑, 번개가 있는 날 = 번개 수 표시
   const markedDates = useMemo(() => {
-    const result: Record<string, { type: 'joined' | 'lightning'; count: number }> = {};
+    const result: Record<string, { hasJoined: boolean; lightningCount: number }> = {};
     for (const walk of walks) {
       const key = dateKey(walk.starts_at);
-      const existing = result[key];
-      if (!existing) {
-        result[key] = { type: walk.joined ? 'joined' : 'lightning', count: 1 };
-      } else {
-        result[key] = {
-          type: existing.type === 'joined' || walk.joined ? 'joined' : 'lightning',
-          count: existing.count + 1,
-        };
-      }
+      const existing = result[key] || { hasJoined: false, lightningCount: 0 };
+      result[key] = {
+        hasJoined: existing.hasJoined || walk.joined,
+        lightningCount: existing.lightningCount + 1,
+      };
     }
     return result;
   }, [walks]);
 
-  // 날짜별 번개 수 (달력 숫자 표시용)
   const dateCountMap = useMemo(() => {
     const result: Record<string, number> = {};
     for (const walk of walks) {
@@ -153,9 +248,23 @@ export function useLightningWalks(joinedOnly = false) {
     return result;
   }, [walks]);
 
+  const joinedDateCountMap = useMemo(() => {
+    const result: Record<string, number> = {};
+    for (const walk of walks) {
+      if (!walk.joined) continue;
+      const key = dateKey(walk.starts_at);
+      result[key] = (result[key] || 0) + 1;
+    }
+    return result;
+  }, [walks]);
+
   const createWalk = useCallback(async (input: CreateLightningInput) => {
     if (!input.title || !input.location || !input.date || !input.time) {
       Alert.alert('입력 확인', '제목, 장소, 날짜, 시간을 모두 입력해 주세요.');
+      return false;
+    }
+    if (!input.selectedDogIds?.length) {
+      Alert.alert('반려견 선택', '번개에 함께 갈 반려견을 선택해 주세요.');
       return false;
     }
     try {
@@ -180,7 +289,11 @@ export function useLightningWalks(joinedOnly = false) {
         .single();
       if (error) throw error;
       if (data?.id) {
-        await supabase.from('lightning_participants').insert({ walk_id: data.id, user_id: user.id });
+        await supabase.from('lightning_participants').insert({
+          walk_id: data.id,
+          user_id: user.id,
+          selected_dog_ids: input.selectedDogIds,
+        });
       }
       await fetchWalks();
       Alert.alert('번개 생성 완료', '번개가 등록되었습니다. 지정된 시간이 지나면 자동으로 사라집니다.');
@@ -191,7 +304,7 @@ export function useLightningWalks(joinedOnly = false) {
     }
   }, [fetchWalks, userLocation]);
 
-  const toggleJoin = useCallback(async (walk: LightningWalk) => {
+  const toggleJoin = useCallback(async (walk: LightningWalk, selectedDogIds: string[] = []) => {
     try {
       const user = await requireCurrentUser();
       if (walk.joined) {
@@ -207,11 +320,15 @@ export function useLightningWalks(joinedOnly = false) {
           Alert.alert('참여 불가', '정원이 모두 찼습니다.');
           return;
         }
+        if (!selectedDogIds.length) {
+          Alert.alert('반려견 선택', '번개에 함께 갈 반려견을 선택해 주세요.');
+          return;
+        }
         const { error } = await supabase
           .from('lightning_participants')
-          .insert({ walk_id: walk.id, user_id: user.id });
+          .insert({ walk_id: walk.id, user_id: user.id, selected_dog_ids: selectedDogIds });
         if (error) throw error;
-        Alert.alert('참여 완료', '번개에 참여했습니다! 달력에서 확인할 수 있습니다.');
+        Alert.alert('참여 완료', '번개에 참여했습니다. 달력에서 확인할 수 있습니다.');
       }
       await fetchWalks();
     } catch (error) {
@@ -224,6 +341,7 @@ export function useLightningWalks(joinedOnly = false) {
     loading,
     markedDates,
     dateCountMap,
+    joinedDateCountMap,
     regionFilter,
     setRegionFilter,
     userLocation,

@@ -13,8 +13,36 @@ export async function requireCurrentUser() {
   return user;
 }
 
+function normalizeErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  if (error && typeof error === 'object') {
+    const value = error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+    const parts = [value.message, value.details, value.hint, value.code]
+      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+    if (parts.length) return parts.join('\n');
+  }
+  return '잠시 후 다시 시도해 주세요.';
+}
+
+function isQuietLoadError(title: string, message: string) {
+  const lower = message.toLowerCase();
+  return title.includes('불러오기 실패') && (
+    lower.includes('no rows') ||
+    lower.includes('0 rows') ||
+    lower.includes('not found') ||
+    lower.includes('pgrst116') ||
+    lower.includes('empty') ||
+    message === '잠시 후 다시 시도해 주세요.'
+  );
+}
+
 export function showError(title: string, error: unknown) {
-  const message = error instanceof Error ? error.message : String(error || '알 수 없는 오류가 발생했습니다.');
+  const message = normalizeErrorMessage(error);
+  if (isQuietLoadError(title, message)) {
+    console.warn(`[${title}]`, message);
+    return;
+  }
   Alert.alert(title, message);
 }
 

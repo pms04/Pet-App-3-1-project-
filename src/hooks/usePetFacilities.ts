@@ -20,7 +20,7 @@ function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
 
 export function usePetFacilities(
   currentLocation: { latitude: number; longitude: number } | null,
-  radiusKm: number = 2,
+  radiusKm: number = 20,
 ) {
   const [facilities, setFacilities] = useState<PetFacility[]>([]);
   const [allData, setAllData] = useState<PetFacility[]>([]);
@@ -46,7 +46,7 @@ export function usePetFacilities(
             });
             setFacilities(nearby as PetFacility[]);
           } else {
-            setFacilities(data.slice(0, 50) as PetFacility[]);
+            setFacilities(data as PetFacility[]);
           }
         }
       } catch (error) {
@@ -70,7 +70,7 @@ export function usePetFacilities(
       f.name.toLowerCase().includes(query) ||
       f.category.toLowerCase().includes(query) ||
       f.address.toLowerCase().includes(query),
-    ).slice(0, 50); // 성능을 위해 검색 결과 제한
+    );
   }, [facilities, allData, searchQuery]);
 
   return {
