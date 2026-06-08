@@ -14,30 +14,12 @@ export interface UserProfileEdit {
 export function useUserProfile() {
   const [nickname, setNickname] = useState('WalkFix 크루');
   const [genderForAvatar, setGenderForAvatar] = useState<string>('M');
-  const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
-  const [location, setLocation] = useState('');
-  const [bio, setBio] = useState('');
 
   const refresh = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const md = user.user_metadata ?? {};
-    setNickname(md.nickname || md.user_real_name || 'WalkFix 크루');
-    setGenderForAvatar(md.user_gender || 'M');
-    setLocation(md.user_location || '');
-    setBio(md.user_bio || '');
-
-    const { data } = await supabase
-      .from('users')
-      .select('profile_image_url,nickname,bio,location')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    if (data) {
-      if (data.profile_image_url) setProfileImageUrl(data.profile_image_url);
-      if (data.nickname) setNickname(data.nickname);
-      if (data.bio) setBio(data.bio);
-      if (data.location) setLocation(data.location);
+    if (user) {
+      if (user.user_metadata?.nickname) setNickname(user.user_metadata.nickname);
+      if (user.user_metadata?.user_gender) setGenderForAvatar(user.user_metadata.user_gender);
     }
   }, []);
 
@@ -45,19 +27,13 @@ export function useUserProfile() {
 
   const loadEditDefaults = useCallback(async (): Promise<UserProfileEdit> => {
     const { data: { user } } = await supabase.auth.getUser();
-    const { data: userData } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', user?.id)
-      .maybeSingle();
     const md = user?.user_metadata ?? {};
     return {
       name: userData?.nickname || md.user_real_name || md.nickname || '',
       gender: (md.user_gender as 'M' | 'F') || 'M',
       birthYear: md.user_birth_year || '',
-      location: userData?.location || md.user_location || '',
-      bio: userData?.bio || md.user_bio || '',
-      profileImageUrl: userData?.profile_image_url || null,
+      location: md.user_location || '',
+      bio: md.user_bio || '',
     };
   }, []);
 
@@ -68,8 +44,7 @@ export function useUserProfile() {
     }
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return false;
-
-    const { error: authError } = await supabase.auth.updateUser({
+    const { error } = await supabase.auth.updateUser({
       data: {
         ...user.user_metadata,
         user_real_name: edit.name,
@@ -80,44 +55,12 @@ export function useUserProfile() {
         profile_completed: true,
       },
     });
-    if (authError) { Alert.alert('수정 실패(Auth)', authError.message); return false; }
-
-    const { error: dbError } = await supabase.from('users').upsert({
-      id: user.id,
-      email: user.email,
-      nickname: edit.name,
-      bio: edit.bio,
-      location: edit.location,
-      profile_image_url: edit.profileImageUrl || profileImageUrl,
-      updated_at: new Date().toISOString(),
-    });
-    if (dbError) { Alert.alert('수정 실패(DB)', dbError.message); return false; }
-
-    setNickname(edit.name);
+    if (error) { Alert.alert('수정 실패', error.message); return false; }
     setGenderForAvatar(edit.gender);
-    setLocation(edit.location);
-    setBio(edit.bio);
-    setProfileImageUrl(edit.profileImageUrl || profileImageUrl);
     Alert.alert('수정 완료', '프로필이 업데이트되었습니다.');
     await refresh();
     return true;
   }, [profileImageUrl, refresh]);
 
-  const updateProfileImage = useCallback(async (uri: string) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { error } = await supabase.from('users').upsert({
-      id: user.id,
-      email: user.email,
-      nickname,
-      bio,
-      location,
-      profile_image_url: uri,
-      updated_at: new Date().toISOString(),
-    });
-    if (error) Alert.alert('오류', '프로필 이미지 저장에 실패했습니다.');
-    else setProfileImageUrl(uri);
-  }, [nickname, bio, location]);
-
-  return { nickname, genderForAvatar, profileImageUrl, location, bio, refresh, loadEditDefaults, updateProfile, updateProfileImage };
+  return { nickname, genderForAvatar, refresh, loadEditDefaults, updateProfile };
 }

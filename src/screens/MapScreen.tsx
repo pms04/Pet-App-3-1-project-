@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
+<<<<<<< HEAD
 import { View, Text, TouchableOpacity, Alert, Animated, StatusBar, Platform, TextInput } from 'react-native';
+=======
+import { StyleSheet, View, Text, TouchableOpacity, Alert, Animated, StatusBar, Platform, TextInput } from 'react-native';
+>>>>>>> 8de0b75d7e800d1be827f4153df4b60a81c068df
 import MapView, { Polyline, Marker, PROVIDER_DEFAULT, Callout } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { styles } from '../styles/styles';
@@ -39,7 +43,23 @@ export function MapScreen() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const lastCoordRef = useRef<{ latitude: number; longitude: number } | null>(null);
   const lastTimestampRef = useRef<number | null>(null);
+<<<<<<< HEAD
   const walkStartedAtRef = useRef<number | null>(null);
+=======
+  const [searchQuery, setSearchQuery] = useState<string>('');
+
+  const handleRequestWalk = (dogName: string) => {
+    Alert.alert(
+      "산책 신청",
+      `${dogName}님에게 함께 산책하기를 신청하시겠습니까?`,
+      [
+        { text: "취소", style: "cancel" },
+        { text: "신청하기", onPress: () => Alert.alert("신청 완료", "산책 신청이 전송되었습니다. 상대방이 수락하면 채팅방이 개설됩니다.") }
+      ]
+    );
+  };
+
+>>>>>>> 8de0b75d7e800d1be827f4153df4b60a81c068df
   const morphAnim = useRef(new Animated.Value(0)).current;
   const { saveWalkLog } = useWalkLogs();
   const { nearbyDogs, message: nearbyMessage } = useNearbyDogs(location);
@@ -193,12 +213,36 @@ export function MapScreen() {
                   <Text style={{ fontSize: 11, fontWeight: '800', color: '#fff' }}>{dog.score}% 궁합</Text>
                   <Text style={{ fontSize: 9, color: 'rgba(255,255,255,0.9)', marginTop: 1 }}>{dog.name}</Text>
                 </View>
+<<<<<<< HEAD
                 <Callout tooltip onPress={() => handleRequestWalk(dog)}>
                   <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 10, width: 170, borderWidth: 1, borderColor: '#eee', alignItems: 'center' }}>
                     <Text style={{ fontWeight: 'bold', fontSize: 14 }}>{dog.name}</Text>
                     <Text style={{ fontSize: 12, color: '#666', marginVertical: 4 }}>{dog.ownerNickname} · {dog.breed}</Text>
                     <Text style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>궁합 점수: {dog.score}%</Text>
                     <View style={{ backgroundColor: '#007AFF', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8 }}><Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>산책 신청하기</Text></View>
+=======
+                <Callout tooltip onPress={() => handleRequestWalk(dog.name)}>
+                  <View style={{
+                    backgroundColor: '#fff',
+                    borderRadius: 12,
+                    padding: 10,
+                    width: 150,
+                    borderWidth: 1,
+                    borderColor: '#eee',
+                    alignItems: 'center'
+                  }}>
+                    <Text style={{ fontWeight: 'bold', fontSize: 14 }}>{dog.name}</Text>
+                    <Text style={{ fontSize: 12, color: '#666', marginVertical: 4 }}>궁합 점수: {result.score}%</Text>
+                    <View style={{
+                      backgroundColor: '#007AFF',
+                      paddingVertical: 6,
+                      paddingHorizontal: 12,
+                      borderRadius: 8,
+                      marginTop: 4
+                    }}>
+                      <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>산책 신청하기</Text>
+                    </View>
+>>>>>>> 8de0b75d7e800d1be827f4153df4b60a81c068df
                   </View>
                 </Callout>
               </Marker>

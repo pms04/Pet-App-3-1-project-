@@ -28,10 +28,15 @@ export function ProfileScreen() {
   const { pick } = useImagePicker();
 
   const { dogs, fetching, insertDog, updateDog } = useDogs();
+<<<<<<< HEAD
   const { nickname, genderForAvatar, profileImageUrl, location, bio, loadEditDefaults, updateProfile, updateProfileImage } = useUserProfile();
   const albumsCtx = useAlbums();
   const { friends } = useFriends();
   const { walks: joinedWalks } = useLightningWalks(true);
+=======
+  const { nickname, genderForAvatar, profileImageUrl, loadEditDefaults, updateProfile, updateProfileImage } = useUserProfile();
+  const albumsCtx = useAlbums();
+>>>>>>> 8de0b75d7e800d1be827f4153df4b60a81c068df
 
   // 모달 표시 플래그
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
