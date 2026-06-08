@@ -1,5 +1,4 @@
 // ProfileScreen — 조립 전용 (각 영역은 sub-component / hook 으로 분리)
-// 동작/UI/Supabase 호출/네비게이션은 원본과 100% 동일합니다.
 import React, { useCallback, useState } from 'react';
 import { Alert, ScrollView } from 'react-native';
 import { styles } from '../styles/styles';
@@ -27,7 +26,7 @@ import { AlbumDetailModal } from './profile/modals/AlbumDetailModal';
 export function ProfileScreen() {
   const { pick } = useImagePicker();
 
-  const { dogs, fetching, insertDog, updateDog } = useDogs();
+  const { dogs, fetching, insertDog, updateDog, deleteDog } = useDogs();
   const { nickname, genderForAvatar, profileImageUrl, location, bio, loadEditDefaults, updateProfile, updateProfileImage } = useUserProfile();
   const albumsCtx = useAlbums();
   const { friends } = useFriends();
@@ -52,7 +51,7 @@ export function ProfileScreen() {
   });
   const patchUserEdit = useCallback(
     (p: Partial<UserProfileEdit>) => setUserEdit((prev) => ({ ...prev, ...p })),
-    []
+    [],
   );
 
   // 앨범 추가용 임시 입력
@@ -62,23 +61,21 @@ export function ProfileScreen() {
   // 앨범 상세 메모 텍스트
   const [detailMemoText, setDetailMemoText] = useState('');
 
-  // ── 이미지 픽 — 원본 pickImageFor 동작 동일
+  // ── 이미지 픽
   const pickImageFor = useCallback(async (target: 'user' | 'dog' | 'album' | 'editdog') => {
     const uri = await pick();
     if (!uri) return;
     if (target === 'user') {
       await updateProfileImage(uri);
-      Alert.alert('성공', '사용자 프로필 사진이 갤러리 이미지로 변경되었습니다.');
+      Alert.alert('변경 완료', '프로필 사진이 변경되었습니다.');
     } else if (target === 'dog') {
       registerForm.patch({ avatarUri: uri });
-      Alert.alert('성공', '반려견 이미지 가용 인덱스 바인딩이 완료되었습니다.');
     } else if (target === 'album') {
       setSelectedLocalImageUri(uri);
     } else if (target === 'editdog') {
       editForm.patch({ avatarUri: uri });
-      Alert.alert('성공', '반려견 이미지가 변경되었습니다.');
     }
-  }, [pick, registerForm, editForm]);
+  }, [pick, registerForm, editForm, updateProfileImage]);
 
   // ── 반려견 등록
   const handleRegisterDog = useCallback(async () => {
@@ -92,7 +89,6 @@ export function ProfileScreen() {
       avatarUri: registerForm.form.avatarUri,
     });
     if (ok) {
-      // 원본과 동일: gender 는 유지, 나머지 입력값 초기화
       registerForm.patch({
         name: '', weight: '', birthDate: '', tendency: '',
         selectedBreed: '', breedSearch: '', avatarUri: null,
@@ -125,6 +121,11 @@ export function ProfileScreen() {
     }
   }, [editingDogId, updateDog, editForm]);
 
+  // ── 반려견 삭제
+  const handleDeleteDog = useCallback(async (dog: DogRecord) => {
+    await deleteDog(dog.id, dog.name);
+  }, [deleteDog]);
+
   // ── 사용자 프로필 수정 열기/저장
   const openEditUserProfile = useCallback(async () => {
     const defaults = await loadEditDefaults();
@@ -139,7 +140,7 @@ export function ProfileScreen() {
 
   // ── 앨범 추가
   const handleAddAlbumItem = useCallback(() => {
-    if (!selectedLocalImageUri) { Alert.alert('오류', '갤러리에서 사진을 선택해 주세요.'); return; }
+    if (!selectedLocalImageUri) { Alert.alert('사진 선택', '갤러리에서 사진을 선택해 주세요.'); return; }
     albumsCtx.addItem(selectedLocalImageUri, newPhotoMemo);
     setSelectedLocalImageUri(null);
     setNewPhotoMemo('');
@@ -191,6 +192,7 @@ export function ProfileScreen() {
         fetching={fetching}
         onAdd={() => setIsRegisterModalOpen(true)}
         onEdit={openEditDogModal}
+        onDelete={handleDeleteDog}
       />
 
       <AlbumGrid

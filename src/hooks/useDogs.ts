@@ -1,4 +1,4 @@
-// Supabase 반려견 CRUD 훅 — 원본 ProfileScreen 동작과 1:1 동일
+// Supabase 반려견 CRUD 훅 — 삭제 기능 추가
 import { useCallback, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import { supabase } from '../../supabase';
@@ -57,7 +57,7 @@ export function useDogs() {
 
   const insertDog = useCallback(async (input: DogInput): Promise<boolean> => {
     const err = validate(input);
-    if (err) { Alert.alert('오류', err); return false; }
+    if (err) { Alert.alert('입력 오류', err); return false; }
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return false;
     const { error } = await supabase.from('dogs').insert([{
@@ -70,18 +70,18 @@ export function useDogs() {
       tendency: encodeTendency(input.avatarUri, input.tendency),
     }]);
     if (error) { Alert.alert('등록 실패', error.message); return false; }
-    Alert.alert('등록 성공', '반려견의 프로필 정보가 안전하게 동기화되었습니다.');
+    Alert.alert('등록 완료', `${input.name}의 프로필이 등록되었습니다.`);
     await fetchDogs();
     return true;
   }, [fetchDogs]);
 
   const updateDog = useCallback(async (id: string, input: DogInput): Promise<boolean> => {
     if (!input.name || !input.weight || !input.birthDate || !input.breed || !input.tendency) {
-      Alert.alert('오류', '모든 필수 항목을 입력해주세요.');
+      Alert.alert('입력 오류', '모든 필수 항목을 입력해 주세요.');
       return false;
     }
-    if (isNaN(parseFloat(input.weight))) { Alert.alert('오류', '체중은 숫자 형식이어야 합니다.'); return false; }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.birthDate)) { Alert.alert('오류', '생년월일은 YYYY-MM-DD 형식을 지켜야 합니다.'); return false; }
+    if (isNaN(parseFloat(input.weight))) { Alert.alert('입력 오류', '체중은 숫자 형식이어야 합니다.'); return false; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.birthDate)) { Alert.alert('입력 오류', '생년월일은 YYYY-MM-DD 형식을 지켜야 합니다.'); return false; }
     const { error } = await supabase.from('dogs').update({
       name: input.name,
       breed: input.breed,
@@ -91,10 +91,38 @@ export function useDogs() {
       tendency: encodeTendency(input.avatarUri, input.tendency),
     }).eq('id', id);
     if (error) { Alert.alert('수정 실패', error.message); return false; }
-    Alert.alert('수정 완료', '반려견 프로필이 수정되었습니다.');
+    Alert.alert('수정 완료', `${input.name}의 프로필이 수정되었습니다.`);
     await fetchDogs();
     return true;
   }, [fetchDogs]);
 
-  return { dogs, fetching, fetchDogs, insertDog, updateDog };
+  // ── 반려견 삭제 (앨범과 동일한 방식)
+  const deleteDog = useCallback(async (id: string, name: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      Alert.alert(
+        `${name} 삭제`,
+        `${name}의 프로필을 삭제하면 관련 산책 기록도 함께 삭제됩니다. 정말 삭제하시겠습니까?`,
+        [
+          { text: '취소', style: 'cancel', onPress: () => resolve(false) },
+          {
+            text: '삭제',
+            style: 'destructive',
+            onPress: async () => {
+              const { error } = await supabase.from('dogs').delete().eq('id', id);
+              if (error) {
+                Alert.alert('삭제 실패', error.message);
+                resolve(false);
+              } else {
+                Alert.alert('삭제 완료', `${name}의 프로필이 삭제되었습니다.`);
+                await fetchDogs();
+                resolve(true);
+              }
+            },
+          },
+        ],
+      );
+    });
+  }, [fetchDogs]);
+
+  return { dogs, fetching, fetchDogs, insertDog, updateDog, deleteDog };
 }

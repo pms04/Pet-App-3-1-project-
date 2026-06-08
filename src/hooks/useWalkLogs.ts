@@ -43,29 +43,44 @@ export function useWalkLogs() {
 
   useEffect(() => { fetchWalkLogs(); }, [fetchWalkLogs]);
 
+  // 산책 완료 날짜 마킹 (주황색 — 달력에서 사용)
   const markedDates = useMemo(() => walkLogs.reduce<Record<string, 'walk'>>((acc, log) => {
     acc[new Date(log.created_at).toISOString().slice(0, 10)] = 'walk';
     return acc;
   }, {}), [walkLogs]);
 
-  const saveWalkLog = useCallback(async (distanceKm: number, durationSec: number, gpsPath: GpsPoint[]) => {
+  // 산책 저장 (선택된 강아지 ID 지원)
+  const saveWalkLog = useCallback(async (
+    distanceKm: number,
+    durationSec: number,
+    gpsPath: GpsPoint[],
+    selectedDogIds?: string[],
+  ) => {
     if (gpsPath.length < 2 || distanceKm <= 0) {
-      Alert.alert('저장 불가', '기록할 산책 경로가 충분하지 않습니다.');
+      Alert.alert('저장 불가', '기록할 산책 경로가 충분하지 않습니다.\n더 걸은 뒤 다시 시도해 주세요.');
       return false;
     }
 
     try {
       const user = await requireCurrentUser();
-      const { data: dogs, error: dogError } = await supabase
-        .from('dogs')
-        .select('id')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: true })
-        .limit(1);
-      if (dogError) throw dogError;
-      const dogId = dogs?.[0]?.id;
+
+      // 선택된 강아지가 있으면 그 중 첫 번째, 없으면 가장 오래된 강아지
+      let dogId: string | undefined;
+      if (selectedDogIds && selectedDogIds.length > 0) {
+        dogId = selectedDogIds[0];
+      } else {
+        const { data: dogs, error: dogError } = await supabase
+          .from('dogs')
+          .select('id')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: true })
+          .limit(1);
+        if (dogError) throw dogError;
+        dogId = dogs?.[0]?.id;
+      }
+
       if (!dogId) {
-        Alert.alert('반려견 등록 필요', '산책 기록을 저장하려면 먼저 프로필 탭에서 반려견을 등록해주세요.');
+        Alert.alert('반려견 등록 필요', '산책 기록을 저장하려면 먼저 프로필 탭에서 반려견을 등록해 주세요.');
         return false;
       }
 
@@ -79,7 +94,7 @@ export function useWalkLogs() {
       });
       if (error) throw error;
       await fetchWalkLogs();
-      Alert.alert('저장 완료', '산책 기록이 Supabase에 저장되었습니다.');
+      Alert.alert('산책 완료! 🐾', `${distanceKm.toFixed(2)}km 산책이 기록되었습니다.\n달력에서 오늘 산책 기록을 확인할 수 있습니다.`);
       return true;
     } catch (error) {
       showError('산책 기록 저장 실패', error);

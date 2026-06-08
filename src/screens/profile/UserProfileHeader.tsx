@@ -20,37 +20,68 @@ interface Props {
 }
 
 function UserProfileHeaderInner({
-  userAvatar, userGenderForAvatar, userNickname, userLocation, userBio, albumsCount, friendsCount, groupsCount,
+  userAvatar, userGenderForAvatar, userNickname, userLocation, userBio,
+  albumsCount, friendsCount, groupsCount,
   onPickAvatar, onOpenFriendModal, onOpenGroupModal, onOpenEditProfile,
 }: Props) {
-  const headline = [userLocation, userBio].filter(Boolean).join(' · ') || '프로필 수정에서 거주지와 소개글을 입력해 주세요.';
+  const headline =
+    [userLocation, userBio].filter(Boolean).join(' · ') ||
+    '프로필 수정에서 거주지와 소개글을 입력해 주세요.';
 
   return (
     <View style={styles.instaProfileHeaderCard}>
       <View style={styles.instaHeaderTopRow}>
-        <TouchableOpacity style={styles.avatarWrapper} onPress={onPickAvatar} activeOpacity={0.8}>
+        {/* 아바타 — + 배지 없이 터치만으로 사진 변경 */}
+        <TouchableOpacity
+          style={styles.avatarWrapper}
+          onPress={onPickAvatar}
+          activeOpacity={0.8}
+        >
           <View style={styles.avatarPlaceholder}>
-            {userAvatar ? <Image source={{ uri: userAvatar }} style={styles.avatarImageReal} /> : <DefaultUserAvatar gender={userGenderForAvatar} size={84} />}
-            <View style={styles.avatarEditBadge}><Text style={styles.avatarEditBadgeText}>+</Text></View>
+            {userAvatar
+              ? <Image source={{ uri: userAvatar }} style={styles.avatarImageReal} />
+              : <DefaultUserAvatar gender={userGenderForAvatar} size={84} />}
           </View>
         </TouchableOpacity>
 
+        {/* 통계 */}
         <View style={styles.instaStatsContainer}>
-          <View style={styles.instaStatItem}><Text style={styles.instaStatNumber}>{albumsCount}</Text><Text style={styles.instaStatLabel}>앨범</Text></View>
-          <TouchableOpacity style={styles.instaStatItem} onPress={onOpenFriendModal}><Text style={styles.instaStatNumber}>{friendsCount}</Text><Text style={styles.instaStatLabel}>친구</Text></TouchableOpacity>
-          <TouchableOpacity style={styles.instaStatItem} onPress={onOpenGroupModal}><Text style={styles.instaStatNumber}>{groupsCount}</Text><Text style={styles.instaStatLabel}>모임</Text></TouchableOpacity>
+          <View style={styles.instaStatItem}>
+            <Text style={styles.instaStatNumber}>{albumsCount}</Text>
+            <Text style={styles.instaStatLabel}>앨범</Text>
+          </View>
+          <TouchableOpacity style={styles.instaStatItem} onPress={onOpenFriendModal}>
+            <Text style={styles.instaStatNumber}>{friendsCount}</Text>
+            <Text style={styles.instaStatLabel}>친구</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.instaStatItem} onPress={onOpenGroupModal}>
+            <Text style={styles.instaStatNumber}>{groupsCount}</Text>
+            <Text style={styles.instaStatLabel}>모임</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
+      {/* 닉네임 / 소개 */}
       <View style={styles.instaProfileBioWrapper}>
         <Text style={styles.userHeadline}>{userNickname}</Text>
         <Text style={styles.userSubline}>{headline}</Text>
       </View>
 
-      <TouchableOpacity style={[styles.appleSecondaryButton, { backgroundColor: '#F2F2F7', marginTop: 10 }]} onPress={onOpenEditProfile}>
+      {/* 프로필 수정 */}
+      <TouchableOpacity
+        style={[styles.appleSecondaryButton, { backgroundColor: '#F2F2F7', marginTop: 10 }]}
+        onPress={onOpenEditProfile}
+        activeOpacity={0.8}
+      >
         <Text style={{ color: '#007AFF', fontSize: 14, fontWeight: '600' }}>프로필 수정</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.appleSecondaryButton} onPress={async () => await supabase.auth.signOut()}>
+
+      {/* 로그아웃 */}
+      <TouchableOpacity
+        style={styles.appleSecondaryButton}
+        onPress={async () => await supabase.auth.signOut()}
+        activeOpacity={0.8}
+      >
         <Text style={styles.appleSecondaryButtonText}>로그아웃</Text>
       </TouchableOpacity>
     </View>
