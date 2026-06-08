@@ -14,6 +14,7 @@ export function RootTabs() {
   return (
     <NavigationContainer>
       <Tab.Navigator
+        id="WalkFixRootTabs"
         screenOptions={{
           tabBarActiveTintColor: '#FF8C00',
           tabBarInactiveTintColor: '#A2A2A7',

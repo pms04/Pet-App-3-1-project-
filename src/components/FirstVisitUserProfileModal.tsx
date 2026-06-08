@@ -34,7 +34,16 @@ export function FirstVisitUserProfileModal({ visible, onComplete }: { visible: b
       if (error) {
         Alert.alert('오류', error.message);
       } else {
-        onComplete();
+        const { error: dbError } = await supabase.from('users').upsert({
+          id: user.id,
+          email: user.email,
+          nickname: name.trim(),
+          location: location.trim(),
+          bio: bio.trim() || null,
+          updated_at: new Date().toISOString(),
+        });
+        if (dbError) Alert.alert('오류', dbError.message);
+        else onComplete();
       }
     }
     setLoading(false);

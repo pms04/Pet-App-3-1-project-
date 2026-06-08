@@ -1,233 +1,183 @@
 import React, { useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Image,
-  StyleSheet, Alert, Modal, TextInput,
+  StyleSheet, Modal, TextInput, ActivityIndicator, RefreshControl,
 } from 'react-native';
-import { FEED_POSTS, MY_COURSES } from '../constants/mockData';
+import { CoursePost, usePosts } from '../hooks/usePosts';
 
 type Tab = 'community' | 'mine';
 
-// ── 커뮤니티 코스 카드 ────────────────────────────────────
-function CommunityCard({ post, onSave }: {
-  post: (typeof FEED_POSTS)[0];
-  onSave: (id: string) => void;
-}) {
-  const [likes, setLikes] = useState(post.likes);
-  const [dislikes, setDislikes] = useState(post.dislikes);
-  const [liked, setLiked] = useState(false);
-  const [disliked, setDisliked] = useState(false);
+function splitTags(value: string) {
+  return value.split(',').map((tag) => tag.trim()).filter(Boolean);
+}
+
+function CommunityCard({ post, onLike }: { post: CoursePost; onLike: (post: CoursePost) => void }) {
   const [showDetail, setShowDetail] = useState(false);
 
   return (
     <View style={s.card}>
-      {/* 작성자 */}
       <View style={s.cardHeader}>
         <View style={s.avatarCircle}>
-          <Text style={{ fontSize: 18 }}>{post.avatar}</Text>
+          <Text style={s.avatarText}>{post.author_name.slice(0, 1)}</Text>
         </View>
-        <Text style={s.authorName}>{post.user}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={s.authorName}>{post.author_name}</Text>
+          <Text style={s.smallMeta}>{new Date(post.created_at).toLocaleDateString()}</Text>
+        </View>
       </View>
 
-      {/* 코스 이미지 */}
-      <Image source={{ uri: post.image }} style={s.courseImage} />
+      {post.image_url ? (
+        <Image source={{ uri: post.image_url }} style={s.courseImage} />
+      ) : (
+        <View style={[s.courseImage, s.coursePlaceholder]}><Text style={s.coursePlaceholderText}>등록된 코스 이미지가 없습니다.</Text></View>
+      )}
 
-      {/* 코스 정보 */}
-      <View style={{ padding: 14 }}>
-        <Text style={s.courseName}>{post.courseName}</Text>
-        <Text style={s.courseMeta}>📏 {post.distance} · ⏱️ {post.duration}</Text>
+      <View style={s.cardBody}>
+        <Text style={s.courseName}>{post.course_name}</Text>
+        <Text style={s.courseMeta}>거리 {post.distance || '-'} · 시간 {post.duration || '-'}</Text>
 
-        {/* 태그 */}
-        <View style={s.tagRow}>
-          {post.tags.map((tag, idx) => (
-            <View key={idx} style={s.tag}>
-              <Text style={s.tagText}>#{tag}</Text>
-            </View>
-          ))}
-        </View>
-
-        {/* 설명 토글 */}
-        {showDetail && (
-          <Text style={s.description}>{post.description}</Text>
+        {!!post.tags.length && (
+          <View style={s.tagRow}>
+            {post.tags.map((tag) => (
+              <View key={tag} style={s.tag}><Text style={s.tagText}>#{tag}</Text></View>
+            ))}
+          </View>
         )}
-        <TouchableOpacity onPress={() => setShowDetail(v => !v)}>
-          <Text style={{ color: '#007AFF', fontSize: 13, marginBottom: 10 }}>
-            {showDetail ? '접기 ▲' : '코스 설명 보기 ▼'}
-          </Text>
-        </TouchableOpacity>
 
-        {/* 액션 버튼 */}
+        {!!post.content && showDetail && <Text style={s.description}>{post.content}</Text>}
+        {!!post.content && (
+          <TouchableOpacity onPress={() => setShowDetail((value) => !value)}>
+            <Text style={s.linkText}>{showDetail ? '접기' : '코스 설명 보기'}</Text>
+          </TouchableOpacity>
+        )}
+
         <View style={s.actionRow}>
-          <TouchableOpacity
-            style={[s.actionBtn, liked && { backgroundColor: '#FFE0B2' }]}
-            onPress={() => { setLiked(v => !v); setLikes(n => liked ? n - 1 : n + 1); if (disliked) { setDisliked(false); setDislikes(n => n - 1); } }}
-          >
-            <Text style={{ fontSize: 14 }}>👍 {likes}</Text>
+          <TouchableOpacity style={s.actionBtn} onPress={() => onLike(post)}>
+            <Text style={s.actionText}>좋아요 {post.likes_count}</Text>
           </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[s.actionBtn, disliked && { backgroundColor: '#FFE0E0' }]}
-            onPress={() => { setDisliked(v => !v); setDislikes(n => disliked ? n - 1 : n + 1); if (liked) { setLiked(false); setLikes(n => n - 1); } }}
-          >
-            <Text style={{ fontSize: 14 }}>👎 {dislikes}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={s.actionBtn}>
-            <Text style={{ fontSize: 14 }}>💬 {post.comments}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[s.saveBtn, post.saved && { backgroundColor: '#E8F5E9' }]}
-            onPress={() => { onSave(post.id); Alert.alert('저장됨', `"${post.courseName}"을 내 보관함에 저장했어요.`); }}
-          >
-            <Text style={{ fontSize: 12, fontWeight: '700', color: post.saved ? '#2E7D32' : '#007AFF' }}>
-              {post.saved ? '✓ 저장됨' : '코스 담기'}
-            </Text>
-          </TouchableOpacity>
+          <View style={s.actionBtn}>
+            <Text style={s.actionText}>댓글 {post.comments_count}</Text>
+          </View>
         </View>
       </View>
     </View>
   );
 }
 
-// ── 내 코스 카드 ─────────────────────────────────────────
-function MyCourseCard({ course }: { course: (typeof MY_COURSES)[0] }) {
-  const [isPublic, setIsPublic] = useState(course.isPublic);
+function MyCourseCard({ post }: { post: CoursePost }) {
   return (
     <View style={s.myCourseCard}>
       <View style={{ flex: 1 }}>
-        <Text style={s.courseName}>{course.courseName}</Text>
-        <Text style={s.courseMeta}>📏 {course.distance} · ⏱️ {course.duration}</Text>
-        <Text style={{ fontSize: 12, color: '#C7C7CC', marginTop: 4 }}>{course.date} 저장</Text>
-        <View style={s.tagRow}>
-          {course.tags.map((tag, idx) => (
-            <View key={idx} style={s.tag}><Text style={s.tagText}>#{tag}</Text></View>
-          ))}
-        </View>
-      </View>
-      <View style={{ alignItems: 'flex-end', gap: 8 }}>
-        <TouchableOpacity
-          style={[s.visibilityBtn, isPublic && { backgroundColor: '#E8F5E9', borderColor: '#4CAF50' }]}
-          onPress={() => { setIsPublic(v => !v); Alert.alert(isPublic ? '비공개 전환' : '공개 전환', isPublic ? '이 코스를 비공개로 설정했어요.' : '커뮤니티에 공유됩니다!'); }}
-        >
-          <Text style={{ fontSize: 12, fontWeight: '600', color: isPublic ? '#2E7D32' : '#8E8E93' }}>
-            {isPublic ? '🌍 공개' : '🔒 비공개'}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={s.shareBtn}
-          onPress={() => Alert.alert('번개에 첨부', '이 코스를 번개 예약 글에 첨부할 수 있어요.\n(번개 만들기에서 코스 선택 기능 예정)')}
-        >
-          <Text style={{ fontSize: 12, fontWeight: '600', color: '#FF8C00' }}>⚡ 번개 첨부</Text>
-        </TouchableOpacity>
+        <Text style={s.courseName}>{post.course_name}</Text>
+        <Text style={s.courseMeta}>거리 {post.distance || '-'} · 시간 {post.duration || '-'}</Text>
+        <Text style={s.smallMeta}>{new Date(post.created_at).toLocaleDateString()} 공유</Text>
+        {!!post.tags.length && (
+          <View style={s.tagRow}>
+            {post.tags.map((tag) => <View key={tag} style={s.tag}><Text style={s.tagText}>#{tag}</Text></View>)}
+          </View>
+        )}
       </View>
     </View>
   );
 }
 
-// ── 코스 공유 모달 ────────────────────────────────────────
-function ShareCourseModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
-  const [desc, setDesc] = useState('');
+function ShareCourseModal({
+  visible,
+  onClose,
+  onSubmit,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSubmit: (input: { courseName: string; distance: string; duration: string; content: string; tags: string[] }) => Promise<boolean>;
+}) {
+  const [courseName, setCourseName] = useState('');
+  const [distance, setDistance] = useState('');
+  const [duration, setDuration] = useState('');
+  const [content, setContent] = useState('');
   const [tags, setTags] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const reset = () => {
+    setCourseName(''); setDistance(''); setDuration(''); setContent(''); setTags('');
+  };
+
+  const handleSubmit = async () => {
+    setSaving(true);
+    const ok = await onSubmit({ courseName, distance, duration, content, tags: splitTags(tags) });
+    setSaving(false);
+    if (ok) { reset(); onClose(); }
+  };
+
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={s.modalContainer}>
         <View style={s.modalHeader}>
-          <TouchableOpacity onPress={onClose}><Text style={{ fontSize: 15, color: '#8E8E93' }}>취소</Text></TouchableOpacity>
-          <Text style={{ fontSize: 17, fontWeight: '700', color: '#1C1C1E' }}>코스 공유하기</Text>
-          <TouchableOpacity onPress={() => { Alert.alert('공유 완료', '커뮤니티에 코스가 등록되었습니다!\n(Supabase 연동 후 실제 저장)'); onClose(); }}>
-            <Text style={{ fontSize: 15, color: '#FF8C00', fontWeight: '700' }}>공유</Text>
-          </TouchableOpacity>
+          <TouchableOpacity onPress={onClose}><Text style={s.modalCancel}>취소</Text></TouchableOpacity>
+          <Text style={s.modalTitle}>코스 공유하기</Text>
+          <TouchableOpacity onPress={handleSubmit} disabled={saving}><Text style={s.modalSave}>{saving ? '저장 중' : '공유'}</Text></TouchableOpacity>
         </View>
-        <ScrollView contentContainerStyle={{ padding: 20 }}>
+        <ScrollView contentContainerStyle={s.modalBody}>
+          <Text style={s.inputLabel}>코스 이름</Text>
+          <TextInput style={s.input} value={courseName} onChangeText={setCourseName} placeholder="예: 한강 저녁 산책 코스" placeholderTextColor="#C7C7CC" />
+          <Text style={s.inputLabel}>거리</Text>
+          <TextInput style={s.input} value={distance} onChangeText={setDistance} placeholder="예: 2.4km" placeholderTextColor="#C7C7CC" />
+          <Text style={s.inputLabel}>소요 시간</Text>
+          <TextInput style={s.input} value={duration} onChangeText={setDuration} placeholder="예: 35분" placeholderTextColor="#C7C7CC" />
           <Text style={s.inputLabel}>코스 설명</Text>
-          <TextInput
-            style={[s.input, { height: 100, textAlignVertical: 'top' }]}
-            value={desc} onChangeText={setDesc}
-            placeholder="산책 코스를 소개해주세요 (추천 포인트, 주의사항 등)"
-            placeholderTextColor="#C7C7CC" multiline
-          />
-          <Text style={s.inputLabel}>태그 (쉼표로 구분)</Text>
-          <TextInput
-            style={s.input} value={tags} onChangeText={setTags}
-            placeholder="예: 평지, 강아지카페, 사진스팟" placeholderTextColor="#C7C7CC"
-          />
-          <View style={{ backgroundColor: '#FFF3E0', borderRadius: 12, padding: 14, marginTop: 12 }}>
-            <Text style={{ fontSize: 13, color: '#E65100', lineHeight: 20 }}>
-              🐾 코스를 공유하면 다른 보호자들이 좋아요, 댓글, 코스 담기로 반응할 수 있어요.
-            </Text>
-          </View>
+          <TextInput style={[s.input, s.textArea]} value={content} onChangeText={setContent} placeholder="추천 포인트와 주의사항을 적어주세요." placeholderTextColor="#C7C7CC" multiline />
+          <Text style={s.inputLabel}>태그</Text>
+          <TextInput style={s.input} value={tags} onChangeText={setTags} placeholder="평지, 사진스팟, 야간산책" placeholderTextColor="#C7C7CC" />
         </ScrollView>
       </View>
     </Modal>
   );
 }
 
-// ── 메인 화면 ─────────────────────────────────────────────
 export function CourseScreen() {
   const [activeTab, setActiveTab] = useState<Tab>('community');
-  const [posts, setPosts] = useState(FEED_POSTS);
   const [showShareModal, setShowShareModal] = useState(false);
-
-  const handleSave = (id: string) => {
-    setPosts(prev => prev.map(p => p.id === id ? { ...p, saved: true } : p));
-  };
+  const { communityPosts, myPosts, loading, refresh, createPost, incrementLike } = usePosts();
+  const list = activeTab === 'community' ? communityPosts : myPosts;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
-      {/* 헤더 */}
-      <View style={s.header}>
-        <Text style={s.headerTitle}>🐾 코스</Text>
-      </View>
-
-      {/* 세그먼트 탭 */}
+    <View style={s.container}>
+      <View style={s.header}><Text style={s.headerTitle}>코스</Text></View>
       <View style={s.segmentContainer}>
         <View style={s.segment}>
-          {(['community', 'mine'] as Tab[]).map(tab => (
-            <TouchableOpacity
-              key={tab}
-              style={[s.segmentBtn, activeTab === tab && s.segmentBtnActive]}
-              onPress={() => setActiveTab(tab)}
-            >
-              <Text style={[s.segmentText, activeTab === tab && s.segmentTextActive]}>
-                {tab === 'community' ? '🌍 커뮤니티' : '📁 내 코스'}
-              </Text>
+          {(['community', 'mine'] as Tab[]).map((tab) => (
+            <TouchableOpacity key={tab} style={[s.segmentBtn, activeTab === tab && s.segmentBtnActive]} onPress={() => setActiveTab(tab)}>
+              <Text style={[s.segmentText, activeTab === tab && s.segmentTextActive]}>{tab === 'community' ? '커뮤니티' : '내 코스'}</Text>
             </TouchableOpacity>
           ))}
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
-        {activeTab === 'community' ? (
-          <View style={{ paddingTop: 8 }}>
-            {posts.map(post => (
-              <CommunityCard key={post.id} post={post} onSave={handleSave} />
-            ))}
-          </View>
-        ) : (
-          <View style={{ padding: 16 }}>
-            <Text style={{ fontSize: 13, color: '#8E8E93', marginBottom: 12 }}>
-              산책 종료 후 저장한 코스 목록이에요. 공개 설정 시 커뮤니티에서도 볼 수 있어요.
-            </Text>
-            {MY_COURSES.map(course => (
-              <MyCourseCard key={course.id} course={course} />
-            ))}
-          </View>
-        )}
-      </ScrollView>
-
-      {/* FAB */}
-      {activeTab === 'mine' && (
-        <TouchableOpacity style={s.fab} onPress={() => setShowShareModal(true)}>
-          <Text style={s.fabText}>+ 코스 공유하기</Text>
-        </TouchableOpacity>
+      {loading ? (
+        <View style={s.center}><ActivityIndicator color="#FF8C00" /><Text style={s.emptyText}>코스를 불러오는 중입니다.</Text></View>
+      ) : (
+        <ScrollView refreshControl={<RefreshControl refreshing={false} onRefresh={refresh} />} contentContainerStyle={s.scrollBody}>
+          {list.length === 0 ? (
+            <View style={s.emptyCard}><Text style={s.emptyTitle}>아직 등록된 코스가 없습니다.</Text><Text style={s.emptyText}>산책 후 코스를 공유하면 이곳에 표시됩니다.</Text></View>
+          ) : activeTab === 'community' ? (
+            list.map((post) => <CommunityCard key={post.id} post={post} onLike={incrementLike} />)
+          ) : (
+            list.map((post) => <MyCourseCard key={post.id} post={post} />)
+          )}
+        </ScrollView>
       )}
 
-      <ShareCourseModal visible={showShareModal} onClose={() => setShowShareModal(false)} />
+      {activeTab === 'mine' && (
+        <TouchableOpacity style={s.fab} onPress={() => setShowShareModal(true)}>
+          <Text style={s.fabText}>+ 코스 공유</Text>
+        </TouchableOpacity>
+      )}
+      <ShareCourseModal visible={showShareModal} onClose={() => setShowShareModal(false)} onSubmit={createPost} />
     </View>
   );
 }
 
 const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#F2F2F7' },
   header: { paddingHorizontal: 20, paddingTop: 60, paddingBottom: 8 },
   headerTitle: { fontSize: 28, fontWeight: '800', color: '#1C1C1E' },
   segmentContainer: { paddingHorizontal: 16, paddingBottom: 8 },
@@ -236,27 +186,41 @@ const s = StyleSheet.create({
   segmentBtnActive: { backgroundColor: '#fff', shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, elevation: 2 },
   segmentText: { fontSize: 14, fontWeight: '600', color: '#8E8E93' },
   segmentTextActive: { color: '#1C1C1E' },
+  scrollBody: { paddingBottom: 120, paddingTop: 8 },
   card: { backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 16, borderRadius: 20, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, elevation: 3 },
   cardHeader: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 8 },
-  avatarCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F2F2F7', alignItems: 'center', justifyContent: 'center' },
+  avatarCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#FFF3E0', alignItems: 'center', justifyContent: 'center' },
+  avatarText: { fontSize: 15, fontWeight: '800', color: '#FF8C00' },
   authorName: { fontSize: 14, fontWeight: '700', color: '#1C1C1E' },
-  courseImage: { width: '100%', height: 220 },
+  smallMeta: { fontSize: 12, color: '#8E8E93', marginTop: 2 },
+  courseImage: { width: '100%', height: 220, backgroundColor: '#E5E5EA' },
+  coursePlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  coursePlaceholderText: { color: '#8E8E93', fontSize: 13, fontWeight: '600' },
+  cardBody: { padding: 14 },
   courseName: { fontSize: 16, fontWeight: '700', color: '#1C1C1E', marginBottom: 4 },
   courseMeta: { fontSize: 13, color: '#8E8E93', marginBottom: 8 },
-  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
+  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6, marginBottom: 8 },
   tag: { backgroundColor: '#F2F2F7', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   tagText: { fontSize: 11, color: '#636366', fontWeight: '600' },
   description: { fontSize: 14, color: '#3C3C43', lineHeight: 22, marginBottom: 8 },
+  linkText: { color: '#007AFF', fontSize: 13, marginBottom: 10, fontWeight: '600' },
   actionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderTopWidth: 0.5, borderTopColor: '#F2F2F7', paddingTop: 12 },
-  actionBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: '#F2F2F7' },
-  saveBtn: { marginLeft: 'auto', backgroundColor: '#EBF5FB', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10 },
-  myCourseCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 12, flexDirection: 'row', alignItems: 'flex-start', shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
-  visibilityBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, borderWidth: 0.5, borderColor: '#E5E5EA' },
-  shareBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: '#FFF3E0' },
+  actionBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: '#F2F2F7' },
+  actionText: { fontSize: 13, fontWeight: '600', color: '#3C3C43' },
+  myCourseCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginHorizontal: 16, marginBottom: 12, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
   fab: { position: 'absolute', bottom: 100, right: 20, backgroundColor: '#FF8C00', paddingHorizontal: 20, paddingVertical: 14, borderRadius: 30, shadowColor: '#FF8C00', shadowOpacity: 0.4, shadowRadius: 12, elevation: 6 },
   fabText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   modalContainer: { flex: 1, backgroundColor: '#F2F2F7' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, backgroundColor: '#fff', borderBottomWidth: 0.5, borderBottomColor: '#E5E5EA' },
+  modalCancel: { fontSize: 15, color: '#8E8E93' },
+  modalTitle: { fontSize: 17, fontWeight: '700', color: '#1C1C1E' },
+  modalSave: { fontSize: 15, color: '#FF8C00', fontWeight: '700' },
+  modalBody: { padding: 20 },
   inputLabel: { fontSize: 13, fontWeight: '600', color: '#8E8E93', marginBottom: 6, marginTop: 16 },
-  input: { backgroundColor: '#fff', borderRadius: 12, padding: 14, fontSize: 15, color: '#1C1C1E', borderWidth: 0.5, borderColor: '#E5E5EA' },
+  input: { backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: '#1C1C1E' },
+  textArea: { minHeight: 100, textAlignVertical: 'top' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  emptyCard: { backgroundColor: '#fff', margin: 16, borderRadius: 18, padding: 24, alignItems: 'center' },
+  emptyTitle: { fontSize: 16, fontWeight: '700', color: '#1C1C1E', marginBottom: 6 },
+  emptyText: { fontSize: 13, color: '#8E8E93', textAlign: 'center' },
 });

@@ -67,6 +67,12 @@ export function DogFormFields({
           onSearchChange={(v) => patch({ breedSearch: v })}
           placeholder={breedPlaceholder}
         />
+        {form.selectedBreed ? (
+          <View style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center' }}>
+            <Text style={{ fontSize: 12, color: '#007AFF', fontWeight: '600' }}>활동량: </Text>
+            <Text style={{ fontSize: 12, color: '#32D74B', fontWeight: '700' }}>{form.energyCategory} ({Math.round(form.energyLevel * 100)}%)</Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.inputGroup}>
