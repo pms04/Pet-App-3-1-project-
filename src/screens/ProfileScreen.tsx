@@ -26,11 +26,8 @@ export function ProfileScreen() {
   const { pick } = useImagePicker();
 
   const { dogs, fetching, insertDog, updateDog } = useDogs();
-  const { nickname, genderForAvatar, loadEditDefaults, updateProfile } = useUserProfile();
+  const { nickname, genderForAvatar, profileImageUrl, loadEditDefaults, updateProfile, updateProfileImage } = useUserProfile();
   const albumsCtx = useAlbums();
-
-  // 사용자 아바타 (원본도 클라이언트 메모리 상태)
-  const [userAvatar, setUserAvatar] = useState<string | null>(null);
 
   // 모달 표시 플래그
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
@@ -66,7 +63,7 @@ export function ProfileScreen() {
     const uri = await pick();
     if (!uri) return;
     if (target === 'user') {
-      setUserAvatar(uri);
+      await updateProfileImage(uri);
       Alert.alert('성공', '사용자 프로필 사진이 갤러리 이미지로 변경되었습니다.');
     } else if (target === 'dog') {
       registerForm.patch({ avatarUri: uri });
@@ -171,7 +168,7 @@ export function ProfileScreen() {
       showsVerticalScrollIndicator={false}
     >
       <UserProfileHeader
-        userAvatar={userAvatar}
+        userAvatar={profileImageUrl}
         userGenderForAvatar={genderForAvatar}
         userNickname={nickname}
         albumsCount={albumsCtx.albums.length}

@@ -1,6 +1,6 @@
-// 반려견 등록/수정 폼 상태 통합 훅 — 두 벌(dogName/editDogName ...) 중복 제거.
 import { useCallback, useState } from 'react';
 import { decodeTendency } from '../utils/dogTendency';
+import { getEnergyByBreed } from '../constants/breedEnergy';
 
 export type DogGender = 'M' | 'F' | 'MN' | 'FN';
 
@@ -14,6 +14,8 @@ export interface DogFormState {
   breedSearch: string;
   showBreedSearch: boolean;
   avatarUri: string | null;
+  energyLevel: number;
+  energyCategory: string;
 }
 
 export const EMPTY_DOG_FORM: DogFormState = {
@@ -26,13 +28,26 @@ export const EMPTY_DOG_FORM: DogFormState = {
   breedSearch: '',
   showBreedSearch: false,
   avatarUri: null,
+  energyLevel: 0.6,
+  energyCategory: 'Regular Exercise',
 };
 
 export function useDogForm(initial: DogFormState = EMPTY_DOG_FORM) {
   const [form, setForm] = useState<DogFormState>(initial);
 
   const patch = useCallback((p: Partial<DogFormState>) => {
-    setForm((prev) => ({ ...prev, ...p }));
+    setForm((prev) => {
+      const newState = { ...prev, ...p };
+      // Auto-update energy level when breed changes
+      if (p.selectedBreed && p.selectedBreed !== prev.selectedBreed) {
+        const energyData = getEnergyByBreed(p.selectedBreed);
+        if (energyData) {
+          newState.energyLevel = energyData.energy_level;
+          newState.energyCategory = energyData.energy_category;
+        }
+      }
+      return newState;
+    });
   }, []);
 
   const reset = useCallback(() => setForm(EMPTY_DOG_FORM), []);
@@ -42,6 +57,8 @@ export function useDogForm(initial: DogFormState = EMPTY_DOG_FORM) {
     gender?: DogGender; tendency?: string; breed?: string;
   }) => {
     const { avatarUri, cleanTendency } = decodeTendency(dog.tendency);
+    const energyData = dog.breed ? getEnergyByBreed(dog.breed) : null;
+    
     setForm({
       name: dog.name,
       weight: String(dog.weight),
@@ -52,6 +69,8 @@ export function useDogForm(initial: DogFormState = EMPTY_DOG_FORM) {
       breedSearch: '',
       showBreedSearch: false,
       avatarUri,
+      energyLevel: energyData?.energy_level || 0.6,
+      energyCategory: energyData?.energy_category || 'Regular Exercise',
     });
   }, []);
 

@@ -1,7 +1,6 @@
-// 앨범 로컬 상태(CRUD + 선택모드 + 상세) 캡슐화 — 원본 동작 동일
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
-import { DEFAULT_ALBUMS } from '../constants/sampleSocial';
+import { supabase } from '../../supabase';
 
 export interface AlbumItem {
   id: string;
@@ -11,22 +10,62 @@ export interface AlbumItem {
 }
 
 export function useAlbums() {
-  const [albums, setAlbums] = useState<AlbumItem[]>(DEFAULT_ALBUMS);
+  const [albums, setAlbums] = useState<AlbumItem[]>([]);
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedPhotos, setSelectedPhotos] = useState<string[]>([]);
   const [selectedAlbumItem, setSelectedAlbumItem] = useState<AlbumItem | null>(null);
 
-  const addItem = useCallback((uri: string, memo: string) => {
-    const today = new Date();
-    const dateString = `${today.getFullYear()}.${String(today.getMonth() + 1).padStart(2, '0')}.${String(today.getDate()).padStart(2, '0')}`;
-    const newItem: AlbumItem = {
-      id: Date.now().toString(),
-      url: uri,
-      memo: memo || '오늘의 소중한 산책 기록 🐾',
-      date: dateString,
-    };
-    setAlbums((prev) => [newItem, ...prev]);
-    Alert.alert('완료', '디바이스 갤러리의 사진이 내 앨범에 성공적으로 추가되었습니다.');
+  const fetchAlbums = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from('albums')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (data) {
+      const formatted: AlbumItem[] = data.map(item => ({
+        id: item.id,
+        url: item.image_url,
+        memo: item.memo || '',
+        date: new Date(item.created_at).toLocaleDateString(),
+      }));
+      setAlbums(formatted);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAlbums();
+  }, [fetchAlbums]);
+
+  const addItem = useCallback(async (uri: string, memo: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from('albums')
+      .insert({
+        user_id: user.id,
+        image_url: uri,
+        memo: memo,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      Alert.alert('오류', '앨범 저장에 실패했습니다.');
+    } else if (data) {
+      const newItem: AlbumItem = {
+        id: data.id,
+        url: data.image_url,
+        memo: data.memo || '',
+        date: new Date(data.created_at).toLocaleDateString(),
+      };
+      setAlbums((prev) => [newItem, ...prev]);
+      Alert.alert('완료', '사진이 내 앨범에 성공적으로 추가되었습니다.');
+    }
   }, []);
 
   const togglePhoto = useCallback((id: string) => {
@@ -58,21 +97,39 @@ export function useAlbums() {
         {
           text: '삭제',
           style: 'destructive',
-          onPress: () => {
-            setAlbums((prev) => prev.filter((item) => !selectedPhotos.includes(item.id)));
-            setSelectedPhotos([]);
-            setIsSelectMode(false);
-            Alert.alert('삭제 완료', '선택한 항목이 안전하게 정리되었습니다.');
+          onPress: async () => {
+            const { error } = await supabase
+              .from('albums')
+              .delete()
+              .in('id', selectedPhotos);
+
+            if (error) {
+              Alert.alert('오류', '삭제에 실패했습니다.');
+            } else {
+              setAlbums((prev) => prev.filter((item) => !selectedPhotos.includes(item.id)));
+              setSelectedPhotos([]);
+              setIsSelectMode(false);
+              Alert.alert('삭제 완료', '선택한 항목이 정리되었습니다.');
+            }
           },
         },
       ]
     );
   }, [selectedPhotos]);
 
-  const updateMemo = useCallback((id: string, memo: string) => {
-    setAlbums((prev) => prev.map((item) => (item.id === id ? { ...item, memo } : item)));
-    setSelectedAlbumItem(null);
-    Alert.alert('알림', '메모 내용이 안전하게 수정 및 저장되었습니다.');
+  const updateMemo = useCallback(async (id: string, memo: string) => {
+    const { error } = await supabase
+      .from('albums')
+      .update({ memo })
+      .eq('id', id);
+
+    if (error) {
+      Alert.alert('오류', '메모 수정에 실패했습니다.');
+    } else {
+      setAlbums((prev) => prev.map((item) => (item.id === id ? { ...item, memo } : item)));
+      setSelectedAlbumItem(null);
+      Alert.alert('알림', '메모 내용이 저장되었습니다.');
+    }
   }, []);
 
   return {
@@ -87,5 +144,6 @@ export function useAlbums() {
     cancelSelectMode,
     deleteSelected,
     updateMemo,
+    refresh: fetchAlbums,
   };
 }

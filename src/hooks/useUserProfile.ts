@@ -1,4 +1,3 @@
-// 사용자 프로필 fetch/update — Supabase auth metadata 기반 (원본과 동일)
 import { useCallback, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import { supabase } from '../../supabase';
@@ -9,17 +8,31 @@ export interface UserProfileEdit {
   birthYear: string;
   location: string;
   bio: string;
+  profileImageUrl?: string;
 }
 
 export function useUserProfile() {
   const [nickname, setNickname] = useState('WalkFix 크루');
   const [genderForAvatar, setGenderForAvatar] = useState<string>('M');
+  const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       if (user.user_metadata?.nickname) setNickname(user.user_metadata.nickname);
       if (user.user_metadata?.user_gender) setGenderForAvatar(user.user_metadata.user_gender);
+      
+      // Fetch from users table for persistence
+      const { data, error } = await supabase
+        .from('users')
+        .select('profile_image_url, nickname')
+        .eq('id', user.id)
+        .single();
+      
+      if (data) {
+        if (data.profile_image_url) setProfileImageUrl(data.profile_image_url);
+        if (data.nickname) setNickname(data.nickname);
+      }
     }
   }, []);
 
@@ -27,13 +40,20 @@ export function useUserProfile() {
 
   const loadEditDefaults = useCallback(async (): Promise<UserProfileEdit> => {
     const { data: { user } } = await supabase.auth.getUser();
+    const { data: userData } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', user?.id)
+      .single();
+      
     const md = user?.user_metadata ?? {};
     return {
-      name: md.user_real_name || md.nickname || '',
+      name: userData?.nickname || md.user_real_name || md.nickname || '',
       gender: (md.user_gender as 'M' | 'F') || 'M',
       birthYear: md.user_birth_year || '',
       location: md.user_location || '',
-      bio: md.user_bio || '',
+      bio: userData?.bio || md.user_bio || '',
+      profileImageUrl: userData?.profile_image_url || null,
     };
   }, []);
 
@@ -44,7 +64,9 @@ export function useUserProfile() {
     }
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return false;
-    const { error } = await supabase.auth.updateUser({
+
+    // 1. Update Auth Metadata
+    const { error: authError } = await supabase.auth.updateUser({
       data: {
         ...user.user_metadata,
         user_real_name: edit.name,
@@ -55,12 +77,44 @@ export function useUserProfile() {
         profile_completed: true,
       },
     });
-    if (error) { Alert.alert('수정 실패', error.message); return false; }
+    if (authError) { Alert.alert('수정 실패(Auth)', authError.message); return false; }
+
+    // 2. Update Users Table
+    const { error: dbError } = await supabase
+      .from('users')
+      .upsert({
+        id: user.id,
+        email: user.email,
+        nickname: edit.name,
+        bio: edit.bio,
+        profile_image_url: edit.profileImageUrl,
+        updated_at: new Date().toISOString(),
+      });
+
+    if (dbError) { Alert.alert('수정 실패(DB)', dbError.message); return false; }
+
     setGenderForAvatar(edit.gender);
+    setProfileImageUrl(edit.profileImageUrl || null);
     Alert.alert('수정 완료', '프로필이 업데이트되었습니다.');
     await refresh();
     return true;
   }, [refresh]);
 
-  return { nickname, genderForAvatar, refresh, loadEditDefaults, updateProfile };
+  const updateProfileImage = useCallback(async (uri: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { error } = await supabase
+      .from('users')
+      .update({ profile_image_url: uri })
+      .eq('id', user.id);
+
+    if (error) {
+      Alert.alert('오류', '프로필 이미지 저장에 실패했습니다.');
+    } else {
+      setProfileImageUrl(uri);
+    }
+  }, []);
+
+  return { nickname, genderForAvatar, profileImageUrl, refresh, loadEditDefaults, updateProfile, updateProfileImage };
 }
