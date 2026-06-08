@@ -2,9 +2,11 @@ import React, { useMemo, useState } from 'react';
 import { View, Text, ScrollView, TextInput, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { styles } from '../styles/styles';
 import { useChatRooms } from '../hooks/useChatRooms';
+import { MessageDetailModal } from './message/MessageDetailModal';
 
 export function MessageScreen() {
   const [query, setQuery] = useState('');
+  const [selectedRoom, setSelectedRoom] = useState<{ id: string; name: string } | null>(null);
   const { rooms, loading, refresh } = useChatRooms();
   const filteredRooms = useMemo(() => rooms.filter((room) => `${room.name} ${room.lastMessage}`.toLowerCase().includes(query.toLowerCase())), [rooms, query]);
 
@@ -25,7 +27,11 @@ export function MessageScreen() {
               <Text style={{ color: '#8E8E93', fontSize: 13, textAlign: 'center' }}>지도에서 주변 강아지에게 산책을 신청하면 대화방이 생성됩니다.</Text>
             </View>
           ) : filteredRooms.map((chat) => (
-            <TouchableOpacity key={chat.id} style={styles.listItemRow}>
+            <TouchableOpacity
+              key={chat.id}
+              style={styles.listItemRow}
+              onPress={() => setSelectedRoom({ id: chat.id, name: chat.name })}
+            >
               <View style={styles.listAvatarPlaceholder}>
                 <Text style={{ fontSize: 15, fontWeight: '800', color: '#FF8C00' }}>{chat.type === 'group' ? 'G' : chat.name.slice(0, 1)}</Text>
               </View>
@@ -43,6 +49,12 @@ export function MessageScreen() {
           ))}
         </ScrollView>
       )}
+      <MessageDetailModal
+        visible={!!selectedRoom}
+        roomId={selectedRoom?.id || null}
+        roomName={selectedRoom?.name || ''}
+        onClose={() => setSelectedRoom(null)}
+      />
     </View>
   );
 }

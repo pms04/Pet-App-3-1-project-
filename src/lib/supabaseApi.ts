@@ -18,6 +18,10 @@ function normalizeErrorMessage(error: unknown) {
   if (typeof error === 'string') return error;
   if (error && typeof error === 'object') {
     const value = error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+    // [object Object] 문자열이 들어오는 경우 방지
+    const messageStr = String(value.message || '');
+    if (messageStr.includes('[object Object]')) return '데이터를 불러올 수 없습니다.';
+
     const parts = [value.message, value.details, value.hint, value.code]
       .filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
     if (parts.length) return parts.join('\n');

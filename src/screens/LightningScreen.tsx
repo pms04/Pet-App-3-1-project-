@@ -350,6 +350,8 @@ export function LightningScreen() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showRegionModal, setShowRegionModal] = useState(false);
+  const [joiningEvent, setJoiningEvent] = useState<LightningWalk | null>(null);
+  const [joiningDogs, setJoiningDogs] = useState<string[]>([]);
 
   const lightning = useLightningWalks();
   const walkLogs = useWalkLogs();
@@ -378,16 +380,22 @@ export function LightningScreen() {
       Alert.alert('반려견 등록 필요', '번개에 참여하려면 프로필 탭에서 반려견을 먼저 등록해 주세요.');
       return;
     }
-    const firstDogId = dogs[0].id;
-    Alert.alert(
-      '번개 참여',
-      `${dogs[0].name}와 함께 이 번개에 참여할까요? 여러 마리를 선택하려면 번개 생성 화면과 동일한 선택 UI를 사용할 수 있도록 확장 가능합니다.`,
-      [
-        { text: '취소', style: 'cancel' },
-        { text: '참여', onPress: () => lightning.toggleJoin(event, [firstDogId]) },
-      ],
-    );
+    setJoiningEvent(event);
+    setJoiningDogs([]);
   }, [dogs, lightning]);
+
+  const confirmJoin = async () => {
+    if (!joiningEvent) return;
+    if (joiningDogs.length === 0) {
+      Alert.alert('반려견 선택', '번개에 함께 갈 반려견을 선택해 주세요.');
+      return;
+    }
+    const ok = await lightning.toggleJoin(joiningEvent, joiningDogs);
+    if (ok) {
+      setJoiningEvent(null);
+      setJoiningDogs([]);
+    }
+  };
 
   const prevMonth = () => { month === 0 ? (setYear((y) => y - 1), setMonth(11)) : setMonth((m) => m - 1); setSelectedDate(null); };
   const nextMonth = () => { month === 11 ? (setYear((y) => y + 1), setMonth(0)) : setMonth((m) => m + 1); setSelectedDate(null); };
@@ -542,6 +550,36 @@ export function LightningScreen() {
         onSelect={lightning.setRegionFilter}
         onClose={() => setShowRegionModal(false)}
       />
+
+      {/* 번개 참여 강아지 선택 모달 */}
+      <Modal visible={!!joiningEvent} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setJoiningEvent(null)}>
+        <View style={s.modalContainer}>
+          <View style={s.modalHeader}>
+            <TouchableOpacity onPress={() => setJoiningEvent(null)}><Text style={s.modalCancel}>취소</Text></TouchableOpacity>
+            <Text style={s.modalTitle}>참여할 반려견 선택</Text>
+            <TouchableOpacity onPress={confirmJoin}><Text style={s.modalSave}>참여</Text></TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={{ padding: 20 }}>
+            <Text style={s.inputLabel}>이 번개에 함께 데려갈 반려견을 선택해 주세요. (복수 선택 가능)</Text>
+            <View style={[s.dogSelectWrap, { marginTop: 12 }]}>
+              {dogs.length === 0 ? (
+                <Text style={s.dogSelectEmpty}>프로필 탭에서 반려견을 먼저 등록해 주세요.</Text>
+              ) : dogs.map((dog) => {
+                const selected = joiningDogs.includes(dog.id);
+                return (
+                  <TouchableOpacity
+                    key={dog.id}
+                    style={[s.dogChip, selected && s.dogChipSelected]}
+                    onPress={() => setJoiningDogs(prev => prev.includes(dog.id) ? prev.filter(id => id !== dog.id) : [...prev, dog.id])}
+                  >
+                    <Text style={[s.dogChipText, selected && s.dogChipTextSelected]}>{dog.name}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
     </View>
   );
 }

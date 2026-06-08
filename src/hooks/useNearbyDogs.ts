@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { supabase } from '../../supabase';
 import { requireCurrentUser, showError } from '../lib/supabaseApi';
 import { calcCompatScore, DogProfile } from '../utils/compatScore';
+import { decodeTendency } from '../utils/dogTendency';
 import { getEnergyByBreed } from '../constants/breedEnergy';
 
 export interface NearbyDog {
@@ -141,6 +142,7 @@ export function useNearbyDogs(
           for (const dog of visibleDogs) {
             const profile = toProfile(dog);
             const compat = baseProfile ? calcCompatScore(baseProfile, profile) : { score: 0, grade: 'danger' as const };
+            const { avatarUri } = decodeTendency(dog.tendency);
             result.push({
               id: dog.id,
               user_id: dog.user_id,
@@ -154,7 +156,7 @@ export function useNearbyDogs(
               latitude: loc.latitude,
               longitude: loc.longitude,
               ownerNickname: dog.users?.nickname || 'WalkFix 사용자',
-              ownerProfileImageUrl: dog.users?.profile_image_url || null,
+              ownerProfileImageUrl: dog.users?.profile_image_url || avatarUri || null,
               score: compat.score,
               grade: compat.grade,
               isWalking: true,

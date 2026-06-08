@@ -37,7 +37,7 @@ function UserProfileHeaderInner({
         >
           <View style={styles.avatarPlaceholder}>
             {userAvatar
-              ? <Image source={{ uri: userAvatar }} style={styles.avatarImageReal} />
+              ? <Image source={{ uri: userAvatar }} style={styles.avatarImageReal} key={userAvatar} />
               : <DefaultUserAvatar gender={userGenderForAvatar} size={84} />}
           </View>
         </TouchableOpacity>

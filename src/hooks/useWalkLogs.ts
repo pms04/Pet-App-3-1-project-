@@ -56,8 +56,8 @@ export function useWalkLogs() {
     gpsPath: GpsPoint[],
     selectedDogIds?: string[],
   ) => {
-    if (gpsPath.length < 2 || distanceKm <= 0) {
-      Alert.alert('저장 불가', '기록할 산책 경로가 충분하지 않습니다.\n더 걸은 뒤 다시 시도해 주세요.');
+    if (gpsPath.length < 1) {
+      Alert.alert('저장 불가', '기록할 산책 경로가 없습니다.');
       return false;
     }
 

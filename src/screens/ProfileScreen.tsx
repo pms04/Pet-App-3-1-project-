@@ -28,7 +28,7 @@ export function ProfileScreen() {
   const { dogs, fetching, insertDog, updateDog, deleteDog } = useDogs();
   const { nickname, genderForAvatar, profileImageUrl, location, bio, loadEditDefaults, updateProfile, updateProfileImage } = useUserProfile();
   const albumsCtx = useAlbums();
-  const { friends, sentRequests, receivedRequests, acceptRequest, rejectRequest, cancelRequest } = useFriends();
+  const { friends, sentRequests, receivedRequests, acceptRequest, rejectRequest, cancelRequest, sendFriendRequest, refresh: refreshFriends } = useFriends();
   const { myPosts } = usePosts();
 
   // 모달 표시 플래그

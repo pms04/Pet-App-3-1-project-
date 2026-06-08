@@ -140,6 +140,44 @@ export function useFriends() {
     }
   }, [fetchFriends]);
 
+  const sendFriendRequest = useCallback(async (otherUserId: string) => {
+    try {
+      const user = await requireCurrentUser();
+      if (user.id === otherUserId) {
+        Alert.alert('알림', '자기 자신에게 친구 신청을 보낼 수 없습니다.');
+        return;
+      }
+
+      // 이미 친구이거나 신청 중인지 확인
+      const { data: existing, error: checkError } = await supabase
+        .from('friends')
+        .select('*')
+        .or(`and(requester_id.eq.${user.id},addressee_id.eq.${otherUserId}),and(requester_id.eq.${otherUserId},addressee_id.eq.${user.id})`);
+      
+      if (checkError) throw checkError;
+      if (existing && existing.length > 0) {
+        const rel = existing[0];
+        if (rel.status === 'accepted') {
+          Alert.alert('알림', '이미 친구 등록이 되어 있습니다.');
+        } else {
+          Alert.alert('알림', '이미 친구 신청을 보냈거나 받은 상태입니다.');
+        }
+        return;
+      }
+
+      const { error } = await supabase.from('friends').insert({
+        requester_id: user.id,
+        addressee_id: otherUserId,
+        status: 'pending'
+      });
+      if (error) throw error;
+      Alert.alert('완료', '친구 신청을 보냈습니다.');
+      await fetchFriends();
+    } catch (error) {
+      showError('친구 신청 실패', error);
+    }
+  }, [fetchFriends]);
+
   return {
     friends,
     sentRequests,
@@ -150,5 +188,6 @@ export function useFriends() {
     acceptRequest,
     rejectRequest,
     cancelRequest,
+    sendFriendRequest,
   };
 }

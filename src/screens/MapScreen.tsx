@@ -9,9 +9,11 @@ import * as Location from 'expo-location';
 import { styles, T } from '../styles/styles';
 import { WeatherWidget } from '../components/WeatherWidget';
 import { gradeColor } from '../utils/compatScore';
+import { decodeTendency } from '../utils/dogTendency';
 import { useNearbyDogs, NearbyDog } from '../hooks/useNearbyDogs';
 import { useWalkLogs } from '../hooks/useWalkLogs';
 import { usePetFacilities, PetFacility } from '../hooks/usePetFacilities';
+import { useFriends } from '../hooks/useFriends';
 import { formatDate, requireCurrentUser, showError } from '../lib/supabaseApi';
 import { supabase } from '../../supabase';
 
@@ -168,6 +170,7 @@ function DogDetailModal({
   if (!dog) return null;
   const color = gradeColor(dog.grade);
   const gradeLabel = dog.grade === 'safe' ? '산책 궁합이 좋아요' : dog.grade === 'caution' ? '천천히 인사해요' : '거리 두고 확인해요';
+  const { cleanTendency } = decodeTendency(dog.tendency);
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <View style={ms.pinOverlay}>
@@ -186,7 +189,7 @@ function DogDetailModal({
           </View>
 
           <View style={ms.jobsInfoGrid}>
-            <View style={ms.jobsInfoPill}><Text style={ms.jobsInfoLabel}>성향</Text><Text style={ms.jobsInfoValue}>{dog.tendency || '미입력'}</Text></View>
+            <View style={ms.jobsInfoPill}><Text style={ms.jobsInfoLabel}>성향</Text><Text style={ms.jobsInfoValue}>{cleanTendency || '미입력'}</Text></View>
             <View style={ms.jobsInfoPill}><Text style={ms.jobsInfoLabel}>성별</Text><Text style={ms.jobsInfoValue}>{dog.gender}</Text></View>
           </View>
 
@@ -242,20 +245,24 @@ function PublicProfileModal({
 
         <View style={ms.publicCard}>
           <Text style={ms.publicSectionTitle}>함께 산책 중인 반려견</Text>
-          {(dogs.length ? dogs : [dog]).map((item: any) => (
-            <View key={item.id} style={ms.publicDogRow}>
-              <View style={ms.publicDogAvatar}>
-                {item.profile_image_url
-                  ? <Image source={{ uri: item.profile_image_url }} style={ms.publicDogImage} />
-                  : <Text style={{ color: T.accent, fontWeight: '900' }}>{String(item.name || dog.name).slice(0, 1)}</Text>}
+          {(dogs.length ? dogs : [dog]).map((item: any) => {
+            const { avatarUri, cleanTendency: itemTendency } = decodeTendency(item.tendency || dog.tendency);
+            const finalImage = item.profile_image_url || avatarUri;
+            return (
+              <View key={item.id} style={ms.publicDogRow}>
+                <View style={ms.publicDogAvatar}>
+                  {finalImage
+                    ? <Image source={{ uri: finalImage }} style={ms.publicDogImage} />
+                    : <Text style={{ color: T.accent, fontWeight: '900' }}>{String(item.name || dog.name).slice(0, 1)}</Text>}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={ms.publicDogName}>{item.name || dog.name}</Text>
+                  <Text style={ms.publicDogMeta}>{item.breed || dog.breed} · {item.weight || dog.weight}kg · {itemTendency || '성향 미입력'}</Text>
+                  {item.birth_date && <Text style={ms.publicDogMeta}>생일 {formatDate(item.birth_date)}</Text>}
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={ms.publicDogName}>{item.name || dog.name}</Text>
-                <Text style={ms.publicDogMeta}>{item.breed || dog.breed} · {item.weight || dog.weight}kg · {item.tendency || dog.tendency || '성향 미입력'}</Text>
-                {item.birth_date && <Text style={ms.publicDogMeta}>생일 {formatDate(item.birth_date)}</Text>}
-              </View>
-            </View>
-          ))}
+            );
+          })}
         </View>
 
         <View style={ms.publicActionWrap}>
@@ -307,6 +314,7 @@ export function MapScreen() {
     publishMyLocation, removeMyLocation,
   } = useNearbyDogs(location, isWalking, selectedDogIds);
   const { facilities, searchQuery: facilitySearchQuery, setSearchQuery: setFacilitySearchQuery } = usePetFacilities(location, 20);
+  const { sendFriendRequest, refresh: refreshFriends } = useFriends();
 
   // ── 산책 신청 실시간 팝업
   useEffect(() => {
@@ -531,26 +539,9 @@ export function MapScreen() {
 
   // ── 친구 신청
   const handleAddFriend = useCallback(async (dog: NearbyDog) => {
-    try {
-      const user = await requireCurrentUser();
-      const { error } = await supabase.from('friends').insert({
-        requester_id: user.id,
-        addressee_id: dog.user_id,
-        status: 'pending',
-      });
-      if (error) {
-        if (error.code === '23505') {
-          Alert.alert('알림', '이미 친구 신청을 보냈거나 친구 관계입니다.');
-        } else {
-          throw error;
-        }
-        return;
-      }
-      Alert.alert('친구 신청 완료', `${dog.ownerNickname}님에게 친구 신청을 보냈습니다.`);
-    } catch (error) {
-      showError('친구 신청 실패', error);
-    }
-  }, []);
+    await sendFriendRequest(dog.user_id);
+    await refreshFriends();
+  }, [sendFriendRequest, refreshFriends]);
 
   // ── 공유 마커 추가
   const handleAddSharedPin = useCallback(async (desc: string) => {
