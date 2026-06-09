@@ -502,11 +502,18 @@ export function MapScreen() {
   const handleChat = useCallback(async (dog: NearbyDog) => {
     try {
       const roomId = await getOrCreateDirectChatRoom(dog.user_id);
+      const { data: otherProfile, error: profileError } = await supabase
+        .from('users')
+        .select('nickname,profile_image_url')
+        .eq('id', dog.user_id)
+        .single();
+      if (profileError) throw profileError;
+
       const chatRoom = {
         id: roomId,
         other_user_id: dog.user_id,
-        other_user_nickname: dog.ownerNickname,
-        other_user_profile_image_url: dog.ownerProfileImageUrl || null,
+        other_user_nickname: otherProfile?.nickname || dog.ownerNickname || '상대방',
+        other_user_profile_image_url: otherProfile?.profile_image_url || dog.ownerProfileImageUrl || null,
       };
       setSelectedRoom(chatRoom);
       setShowMessageDetail(true);

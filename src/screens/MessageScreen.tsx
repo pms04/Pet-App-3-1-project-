@@ -68,7 +68,7 @@ export function MessageScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text style={styles.listItemTitle}>{chat.name === '대화방' ? chat.other_user_nickname : chat.name}</Text>
+                    <Text style={styles.listItemTitle}>{chat.type === 'direct' ? chat.other_user_nickname : (chat.name === '대화방' ? chat.other_user_nickname : chat.name)}</Text>
                     <Text style={{ fontSize: 11, color: '#8E8E93' }}>{chat.time}</Text>
                   </View>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>

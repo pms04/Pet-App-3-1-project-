@@ -44,6 +44,19 @@ export function useChatRooms() {
         .in('room_id', roomIds)
         .order('created_at', { ascending: false });
 
+      const otherUserIds = Array.from(new Set((memberRows || [])
+        .filter((row: any) => row.user_id !== user.id)
+        .map((row: any) => row.user_id)
+        .filter(Boolean)));
+      const { data: otherUsers } = otherUserIds.length > 0 ? await supabase
+        .from('users')
+        .select('id,nickname,profile_image_url')
+        .in('id', otherUserIds) : { data: [] };
+      const otherUsersById = (otherUsers || []).reduce<Record<string, any>>((acc, userRow: any) => {
+        acc[userRow.id] = userRow;
+        return acc;
+      }, {});
+
       const latestByRoom = new Map<string, any>();
       (messages || []).forEach((message: any) => {
         if (!latestByRoom.has(message.room_id)) latestByRoom.set(message.room_id, message);
@@ -61,9 +74,13 @@ export function useChatRooms() {
         const names = otherMembers.map((member) => member.users?.nickname).filter(Boolean);
         const latest = latestByRoom.get(roomId);
         const firstOther = otherMembers[0];
+        const dbNickname = firstOther?.users?.nickname || otherUsersById[firstOther?.user_id || '']?.nickname;
+        const dbProfileImage = firstOther?.users?.profile_image_url || otherUsersById[firstOther?.user_id || '']?.profile_image_url;
+        const otherNickname = dbNickname || (names[0] || '상대방');
+        const otherProfileImageUrl = dbProfileImage || null;
         
         const displayName = otherMembers.length === 1
-          ? firstOther?.users?.nickname || '대화방'
+          ? otherNickname
           : names.length > 0 ? names.join(', ') : '대화방';
         
         return {
@@ -74,8 +91,8 @@ export function useChatRooms() {
           unread: 0,
           type: otherMembers.length > 1 ? 'group' : 'direct',
           other_user_id: firstOther?.user_id || null,
-          other_user_nickname: firstOther?.users?.nickname || (names[0] || '상대방'),
-          other_user_profile_image_url: firstOther?.users?.profile_image_url || null,
+          other_user_nickname: otherNickname,
+          other_user_profile_image_url: otherProfileImageUrl,
         };
       }));
     } catch (error) {
@@ -134,18 +151,30 @@ export async function getOrCreateDirectChatRoom(otherUserId: string): Promise<st
 
     if (error) throw error;
 
-    const roomsById = (roomRows || []).reduce<Record<string, Set<string>>>((acc, row: any) => {
+    const candidateRoomIds = Object.entries((roomRows || []).reduce<Record<string, Set<string>>>((acc, row: any) => {
       if (!acc[row.room_id]) acc[row.room_id] = new Set();
       acc[row.room_id].add(row.user_id);
       return acc;
-    }, {});
+    }, {})).filter(([_, members]) =>
+      members.has(user.id) && members.has(otherUserId)
+    ).map(([roomId]) => roomId);
 
-    const directRoomId = Object.entries(roomsById).find(([_, members]) =>
-      members.size === 2 && members.has(user.id) && members.has(otherUserId)
-    )?.[0];
+    if (candidateRoomIds.length > 0) {
+      const { data: allMembers, error: membersError } = await supabase
+        .from('chat_room_members')
+        .select('room_id')
+        .in('room_id', candidateRoomIds);
+      if (membersError) throw membersError;
 
-    if (directRoomId) {
-      return directRoomId;
+      const memberCountByRoom = (allMembers || []).reduce<Record<string, number>>((acc, row: any) => {
+        acc[row.room_id] = (acc[row.room_id] || 0) + 1;
+        return acc;
+      }, {});
+
+      const existingDirectRoomId = candidateRoomIds.find((roomId) => memberCountByRoom[roomId] === 2);
+      if (existingDirectRoomId) {
+        return existingDirectRoomId;
+      }
     }
 
     return await createNewDirectChatRoom(user.id, otherUserId);
