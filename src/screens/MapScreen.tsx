@@ -16,6 +16,8 @@ import { usePetFacilities, PetFacility } from '../hooks/usePetFacilities';
 import { useFriends } from '../hooks/useFriends';
 import { formatDate, requireCurrentUser, showError } from '../lib/supabaseApi';
 import { supabase } from '../../supabase';
+import { getOrCreateDirectChatRoom } from '../hooks/useChatRooms';
+import { MessageDetailModal } from './message/MessageDetailModal';
 
 interface PathSegment {
   id: string;
@@ -228,21 +230,17 @@ function PublicProfileModal({
   onChat: (dog: NearbyDog) => void;
 }) {
   if (!dog) return null;
-
-  // 실제 프로필 이미지: users 테이블에서 가져온 profile.profile_image_url 우선
-  const ownerImageUrl = profile?.profile_image_url || dog.ownerProfileImageUrl || null;
-
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <ScrollView style={{ flex: 1, backgroundColor: '#F5F5F7' }} contentContainerStyle={{ paddingBottom: 32 }}>
         <View style={ms.publicHeader}>
           <TouchableOpacity onPress={onClose} style={ms.publicCloseBtn}><Text style={{ color: '#007AFF', fontWeight: '700' }}>닫기</Text></TouchableOpacity>
           <View style={ms.publicAvatarWrap}>
-            {ownerImageUrl
-              ? <Image source={{ uri: ownerImageUrl }} style={ms.publicAvatar} />
-              : <Text style={ms.publicAvatarInitial}>{(profile?.nickname || dog.ownerNickname).slice(0, 1)}</Text>}
+            {dog.ownerProfileImageUrl
+              ? <Image source={{ uri: dog.ownerProfileImageUrl }} style={ms.publicAvatar} />
+              : <Text style={ms.publicAvatarInitial}>{dog.ownerNickname.slice(0, 1)}</Text>}
           </View>
-          <Text style={ms.publicName}>{profile?.nickname || dog.ownerNickname}</Text>
+          <Text style={ms.publicName}>{dog.ownerNickname}</Text>
           <Text style={ms.publicSub}>{profile?.location || '지역 미입력'} · 산책 매칭 {dog.score}%</Text>
           {!!profile?.bio && <Text style={ms.publicBio}>{profile.bio}</Text>}
         </View>
@@ -313,6 +311,8 @@ export function MapScreen() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const morphAnim = useRef(new Animated.Value(0)).current;
   const { saveWalkLog } = useWalkLogs();
+  const [selectedRoom, setSelectedRoom] = useState<any>(null);
+  const [showMessageDetail, setShowMessageDetail] = useState(false);
   const {
     nearbyDogs, message: nearbyMessage, refresh: refreshDogs,
     publishMyLocation, removeMyLocation,
@@ -463,65 +463,60 @@ export function MapScreen() {
     setShowDogDetail(true);
   }, []);
 
-  // ── 산책 신청 (채팅방 생성 포함)
+  // ── 산책 신청 (1:1 채팅방 중복 방지 + 상대방 정보 포함)
   const handleRequestWalk = useCallback(async (dog: NearbyDog) => {
     try {
       const user = await requireCurrentUser();
-      const { data: room, error: roomError } = await supabase.from('chat_rooms').insert({}).select('id').single();
-      if (roomError) throw roomError;
-      await supabase.from('chat_room_members').insert([
-        { room_id: room.id, user_id: user.id },
-        { room_id: room.id, user_id: dog.user_id },
-      ]);
+      const roomId = await getOrCreateDirectChatRoom(dog.user_id);
+      const { data: myProfile } = await supabase.from('users').select('nickname,profile_image_url').eq('id', user.id).single();
+      
+      const { error: requestError } = await supabase
+        .from('walk_requests')
+        .insert({
+          requester_id: user.id,
+          requester_name: myProfile?.nickname || '사용자',
+          requester_avatar: myProfile?.profile_image_url || null,
+          receiver_id: dog.user_id,
+          dog_id: dog.id,
+          dog_name: dog.name,
+          dog_avatar: dog.ownerProfileImageUrl || null,
+          matching_score: dog.score,
+          status: 'pending',
+        });
+      
+      if (requestError) throw requestError;
+      
       await supabase.from('messages').insert({
-        room_id: room.id,
+        room_id: roomId,
         sender_id: user.id,
-        content: `${dog.name}와 함께 산책하고 싶어요!`,
+        content: `[산책 신청] ${myProfile?.nickname || '사용자'}님이 산책을 신청했습니다. 궁합율: ${dog.score}%`,
       });
-      Alert.alert('신청 완료', '채팅방이 생성되었습니다. 채팅 탭에서 대화를 시작해 보세요!');
+      
+      Alert.alert('신청 완료', `${dog.ownerNickname}님에게 산책 신청을 보냈습니다.`);
     } catch (error) {
       showError('산책 신청 실패', error);
     }
   }, [selectedDogIds]);
 
-  // ── 대화하기 (기존 채팅방 확인 후 없으면 생성)
+  // ── 대화하기 (채팅방 중복 방지 + 자동 진입)
   const handleChat = useCallback(async (dog: NearbyDog) => {
     try {
-      const user = await requireCurrentUser();
-      // 내가 속한 채팅방 목록
-      const { data: myRooms } = await supabase
-        .from('chat_room_members')
-        .select('room_id')
-        .eq('user_id', user.id);
-      const myRoomIds = (myRooms || []).map((r: any) => r.room_id);
-
-      if (myRoomIds.length > 0) {
-        // 상대방도 속한 채팅방이 있는지 확인
-        const { data: targetRooms } = await supabase
-          .from('chat_room_members')
-          .select('room_id')
-          .eq('user_id', dog.user_id)
-          .in('room_id', myRoomIds);
-        if (targetRooms && targetRooms.length > 0) {
-          Alert.alert('대화하기', '이미 채팅방이 있습니다. 채팅 탭에서 확인해 주세요.');
-          return;
-        }
-      }
-
-      // 새 채팅방 생성
-      const { data: room, error } = await supabase.from('chat_rooms').insert({}).select('id').single();
-      if (error) throw error;
-      await supabase.from('chat_room_members').insert([
-        { room_id: room.id, user_id: user.id },
-        { room_id: room.id, user_id: dog.user_id },
-      ]);
-      Alert.alert('채팅방 생성', '채팅 탭에서 대화를 시작해 보세요!');
+      const roomId = await getOrCreateDirectChatRoom(dog.user_id);
+      const chatRoom = {
+        id: roomId,
+        other_user_id: dog.user_id,
+        other_user_nickname: dog.ownerNickname,
+        other_user_profile_image_url: dog.ownerProfileImageUrl || null,
+      };
+      setSelectedRoom(chatRoom);
+      setShowMessageDetail(true);
+      setShowDogDetail(false);
     } catch (error) {
       showError('채팅방 생성 실패', error);
     }
   }, []);
 
-  // ── 프로필 보기 (users 테이블에서 실제 프로필 데이터 로드)
+  // ── 프로필 보기 (친구 여부 상관없이 공개)
   const handleViewProfile = useCallback(async (dog: NearbyDog) => {
     setPublicProfile(null);
     setPublicDogs([]);
@@ -546,43 +541,30 @@ export function MapScreen() {
     await refreshFriends();
   }, [sendFriendRequest, refreshFriends]);
 
-  // ── 공유 마커 추가 (수정: user_id 컬럼 사용)
+  // ── 공유 마커 추가 (실시간 마커 공유)
   const handleAddSharedPin = useCallback(async (desc: string) => {
     if (!location) return;
     try {
       const user = await requireCurrentUser();
-      const { data: userData } = await supabase.from('users').select('nickname').eq('id', user.id).single();
-      const now = Date.now();
-      const expiresAt = new Date(now + 30_000).toISOString();
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('shared_pins')
         .insert({
-          user_id: user.id,          // ← 수정: owner_id → user_id
           latitude: location.latitude,
           longitude: location.longitude,
           description: desc,
-          owner_nickname: userData?.nickname || '나',
-          expires_at: expiresAt,     // ← 수정: visible_until → expires_at
-        })
-        .select('id,created_at')
-        .single();
+          owner_id: user.id,
+          user_id: user.id,
+          owner_nickname: (await supabase.from('users').select('nickname').eq('id', user.id).single()).data?.nickname || '산책자',
+          expires_at: new Date(Date.now() + 30 * 1000).toISOString(),
+        });
       if (error) throw error;
-      const pin: SharedPin = {
-        id: data?.id || now.toString(),
-        latitude: location.latitude,
-        longitude: location.longitude,
-        description: desc,
-        createdAt: data?.created_at ? new Date(data.created_at).getTime() : now,
-        expiresAt: new Date(expiresAt).getTime(),
-        ownerNickname: userData?.nickname || '나',
-      };
-      setSharedPins((prev) => [pin, ...prev.filter((item) => item.id !== pin.id)]);
+      await fetchSharedPins();
       setShowPinModal(false);
+      Alert.alert('공유 완료', `"${desc}" 위치를 공유했습니다.`);
     } catch (error) {
-      setShowPinModal(false);
-      showError('장소 공유 실패', error);
+      showError('위치 공유 실패', error);
     }
-  }, [location]);
+  }, [fetchSharedPins, location]);
 
   // ── GPS 위치 추적
   useEffect(() => {
@@ -668,8 +650,11 @@ export function MapScreen() {
         text: '기록 저장',
         onPress: async () => {
           const durationSec = walkStartedAtRef.current ? Math.round((Date.now() - walkStartedAtRef.current) / 1000) : 0;
-          const ok = await saveWalkLog(totalDistance, durationSec, flattenPath(segments), selectedDogIds);
-          if (ok) Animated.timing(morphAnim, { toValue: 0, duration: 300, useNativeDriver: false }).start(resetWalk);
+          const ok = await saveWalkLog({ dog_id: selectedDogIds[0], distance_km: totalDistance, duration_sec: durationSec, gps_path: flattenPath(segments) });
+          if (ok) {
+            Alert.alert('저장 완료', '산책 기록이 저장되었습니다.');
+            Animated.timing(morphAnim, { toValue: 0, duration: 300, useNativeDriver: false }).start(resetWalk);
+          }
         },
       },
     ]);
@@ -923,6 +908,7 @@ export function MapScreen() {
           </View>
         </View>
       </Modal>
+      <MessageDetailModal visible={showMessageDetail} room={selectedRoom} onClose={() => { setShowMessageDetail(false); setSelectedRoom(null); }} />
     </View>
   );
 }

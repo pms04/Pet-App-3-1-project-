@@ -42,6 +42,8 @@ export function MessageDetailModal({ visible, room, onClose }: Props) {
   const [myProfileImageUrl, setMyProfileImageUrl] = useState<string | null>(null);
   const flatListRef = useRef<FlatList<Message>>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const messageIdsRef = useRef<Set<string>>(new Set());
 
   // ── 내 사용자 정보 로드
   useEffect(() => {
@@ -58,14 +60,16 @@ export function MessageDetailModal({ visible, room, onClose }: Props) {
           setMyNickname(data.nickname || '나');
           setMyProfileImageUrl(data.profile_image_url || null);
         }
-      } catch (_) {}
+      } catch (error) {
+        console.error('[사용자 정보 로드 실패]', error);
+      }
     })();
   }, []);
 
   // ── 메시지 목록 로드
-  const fetchMessages = useCallback(async () => {
+  const fetchMessages = useCallback(async (silent = false) => {
     if (!room) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const { data, error } = await supabase
         .from('messages')
@@ -73,58 +77,89 @@ export function MessageDetailModal({ visible, room, onClose }: Props) {
         .eq('room_id', room.id)
         .order('created_at', { ascending: true });
       if (error) throw error;
-      setMessages((data || []) as Message[]);
+      
+      const enrichedMessages: Message[] = [];
+      for (const msg of (data || [])) {
+        const { data: senderData } = await supabase
+          .from('users')
+          .select('nickname,profile_image_url')
+          .eq('id', msg.sender_id)
+          .single();
+        enrichedMessages.push({
+          ...msg,
+          sender_nickname: senderData?.nickname || '사용자',
+          sender_profile_image_url: senderData?.profile_image_url || null,
+        });
+        messageIdsRef.current.add(msg.id);
+      }
+      setMessages(enrichedMessages);
     } catch (error) {
       showError('메시지 불러오기 실패', error);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [room]);
 
-  // ── Realtime 구독 (채팅방 열릴 때)
+  // ── Realtime 구독 (메시지 실시간 수신)
   useEffect(() => {
     if (!visible || !room) {
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
+      messageIdsRef.current.clear();
       return;
     }
 
+    messageIdsRef.current.clear();
     fetchMessages();
 
+    // Realtime 채널 구독
     const channel = supabase
-      .channel(`messages_${room.id}`)
+      .channel('realtime_messages')
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
         table: 'messages',
-        filter: `room_id=eq.${room.id}`,
       }, async (payload: any) => {
         const newMsg = payload.new as Message;
-        // 발신자 프로필 정보 가져오기
+        if (!newMsg || newMsg.room_id !== room.id) return;
+
+        if (messageIdsRef.current.has(newMsg.id)) {
+          console.log('[메시지 중복 방지]', newMsg.id);
+          return;
+        }
+        
+        messageIdsRef.current.add(newMsg.id);
+        
         const { data: senderData } = await supabase
           .from('users')
           .select('nickname,profile_image_url')
           .eq('id', newMsg.sender_id)
           .single();
+        
         const enrichedMsg: Message = {
           ...newMsg,
           sender_nickname: senderData?.nickname || '사용자',
           sender_profile_image_url: senderData?.profile_image_url || null,
         };
-        setMessages((prev) => {
-          // 중복 방지
-          if (prev.some((m) => m.id === enrichedMsg.id)) return prev;
-          return [...prev, enrichedMsg];
-        });
-        // 스크롤 맨 아래로
+        
+        setMessages((prev) => [...prev, enrichedMsg]);
         setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+        console.log('[새 메시지 수신]', enrichedMsg.content, payload);
       })
       .subscribe();
 
     channelRef.current = channel;
+    pollingIntervalRef.current = setInterval(() => {
+      fetchMessages(true);
+    }, 2500);
+    
     return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
       supabase.removeChannel(channel);
       channelRef.current = null;
     };
@@ -134,26 +169,39 @@ export function MessageDetailModal({ visible, room, onClose }: Props) {
   const sendMessage = useCallback(async () => {
     const text = inputText.trim();
     if (!text || !room || !myUserId) return;
+    
     setInputText('');
+    
     try {
-      const { error } = await supabase.from('messages').insert({
+      const { data, error } = await supabase.from('messages').insert({
         room_id: room.id,
         sender_id: myUserId,
         content: text,
-      });
+      }).select('id,room_id,sender_id,content,created_at').single();
       if (error) throw error;
+      if (data) {
+        const newMessage: Message = {
+          ...data,
+          sender_nickname: myNickname,
+          sender_profile_image_url: myProfileImageUrl,
+        };
+        messageIdsRef.current.add(newMessage.id);
+        setMessages((prev) => [...prev, newMessage]);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+      }
+      console.log('[메시지 전송 성공]', text);
     } catch (error) {
       setInputText(text); // 실패 시 복원
       showError('메시지 전송 실패', error);
     }
-  }, [inputText, room, myUserId]);
+  }, [inputText, room, myUserId, myNickname, myProfileImageUrl]);
 
   // ── 메시지 로드 후 스크롤
   useEffect(() => {
-    if (messages.length > 0) {
+    if (messages.length > 0 && !loading) {
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
     }
-  }, [messages.length]);
+  }, [messages.length, loading]);
 
   const renderMessage = useCallback(({ item }: { item: Message }) => {
     const isMe = item.sender_id === myUserId;
@@ -255,36 +303,36 @@ const ms = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: Platform.OS === 'ios' ? 56 : 16,
     paddingBottom: 12,
-    backgroundColor: T.white,
+    backgroundColor: '#fff',
     borderBottomWidth: 0.5,
-    borderBottomColor: T.fill2,
+    borderBottomColor: '#E5E5EA',
   },
   backBtn: { width: 60 },
   backText: { color: T.accent, fontSize: 15, fontWeight: '600' },
   headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  headerAvatarWrap: { width: 32, height: 32, borderRadius: 16, backgroundColor: T.fill1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  headerAvatarWrap: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F2F2F7', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   headerAvatar: { width: 32, height: 32, borderRadius: 16 },
   headerAvatarText: { fontSize: 14, fontWeight: '800', color: T.accent },
-  headerTitle: { fontSize: 16, fontWeight: '700', color: T.label1 },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: '#1C1C1E' },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   listContent: { paddingHorizontal: 16, paddingVertical: 12, paddingBottom: 20 },
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 60 },
-  emptyText: { fontSize: 14, color: T.label4, textAlign: 'center', lineHeight: 22 },
+  emptyText: { fontSize: 14, color: '#8E8E93', textAlign: 'center', lineHeight: 22 },
   messageRow: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 12 },
   messageRowMe: { flexDirection: 'row-reverse' },
-  avatarWrap: { width: 32, height: 32, borderRadius: 16, backgroundColor: T.fill1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', marginRight: 8 },
+  avatarWrap: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F2F2F7', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', marginRight: 8 },
   avatar: { width: 32, height: 32, borderRadius: 16 },
   avatarText: { fontSize: 14, fontWeight: '800', color: T.accent },
   bubbleWrap: { maxWidth: '72%' },
   bubbleWrapMe: { alignItems: 'flex-end' },
-  senderName: { fontSize: 11, color: T.label4, marginBottom: 3, marginLeft: 4 },
+  senderName: { fontSize: 11, color: '#8E8E93', marginBottom: 3, marginLeft: 4 },
   bubble: {
     borderRadius: 18,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
   bubbleOther: {
-    backgroundColor: T.white,
+    backgroundColor: '#fff',
     borderBottomLeftRadius: 4,
     shadowColor: '#000',
     shadowOpacity: 0.05,
@@ -295,9 +343,9 @@ const ms = StyleSheet.create({
     backgroundColor: T.accent,
     borderBottomRightRadius: 4,
   },
-  bubbleText: { fontSize: 15, color: T.label1, lineHeight: 22 },
-  bubbleTextMe: { color: T.white },
-  timeText: { fontSize: 10, color: T.label4, marginTop: 3, marginLeft: 4 },
+  bubbleText: { fontSize: 15, color: '#1C1C1E', lineHeight: 22 },
+  bubbleTextMe: { color: '#fff' },
+  timeText: { fontSize: 10, color: '#8E8E93', marginTop: 3, marginLeft: 4 },
   timeTextMe: { marginLeft: 0, marginRight: 4 },
   inputBar: {
     flexDirection: 'row',
@@ -305,20 +353,20 @@ const ms = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     paddingBottom: Platform.OS === 'ios' ? 28 : 10,
-    backgroundColor: T.white,
+    backgroundColor: '#fff',
     borderTopWidth: 0.5,
-    borderTopColor: T.fill2,
+    borderTopColor: '#E5E5EA',
     gap: 8,
   },
   input: {
     flex: 1,
-    backgroundColor: T.fill1,
+    backgroundColor: '#F2F2F7',
     borderRadius: 22,
     paddingHorizontal: 16,
     paddingTop: 10,
     paddingBottom: 10,
     fontSize: 15,
-    color: T.label1,
+    color: '#1C1C1E',
     maxHeight: 120,
   },
   sendBtn: {
@@ -329,6 +377,6 @@ const ms = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  sendBtnDisabled: { backgroundColor: T.fill2 },
-  sendBtnText: { color: T.white, fontSize: 14, fontWeight: '700' },
+  sendBtnDisabled: { backgroundColor: '#E5E5EA' },
+  sendBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
 });

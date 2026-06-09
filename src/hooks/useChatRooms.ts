@@ -9,7 +9,6 @@ export interface ChatRoomPreview {
   time: string;
   unread: number;
   type: 'group' | 'direct';
-  // 추가: 상대방 정보 (MessageDetailModal에 전달)
   other_user_id: string | null;
   other_user_nickname: string;
   other_user_profile_image_url: string | null;
@@ -35,7 +34,6 @@ export function useChatRooms() {
         return;
       }
 
-      // users 테이블 join으로 실제 프로필 이미지 가져오기
       const { data: memberRows } = await supabase
         .from('chat_room_members')
         .select('room_id,user_id,users(id,nickname,profile_image_url)')
@@ -63,16 +61,20 @@ export function useChatRooms() {
         const names = otherMembers.map((member) => member.users?.nickname).filter(Boolean);
         const latest = latestByRoom.get(roomId);
         const firstOther = otherMembers[0];
+        
+        const displayName = otherMembers.length === 1
+          ? firstOther?.users?.nickname || '대화방'
+          : names.length > 0 ? names.join(', ') : '대화방';
+        
         return {
           id: roomId,
-          name: names.length ? names.join(', ') : '내 대화방',
+          name: displayName,
           lastMessage: latest?.content || '아직 메시지가 없습니다.',
           time: formatTime(latest?.created_at),
           unread: 0,
           type: otherMembers.length > 1 ? 'group' : 'direct',
-          // 상대방 정보 (실제 users 테이블 데이터)
           other_user_id: firstOther?.user_id || null,
-          other_user_nickname: firstOther?.users?.nickname || '상대방',
+          other_user_nickname: firstOther?.users?.nickname || (names[0] || '상대방'),
           other_user_profile_image_url: firstOther?.users?.profile_image_url || null,
         };
       }));
@@ -84,7 +86,6 @@ export function useChatRooms() {
     }
   }, []);
 
-  // ── Realtime 구독: 새 메시지 도착 시 채팅방 목록 갱신
   useEffect(() => {
     fetchRooms();
 
@@ -114,4 +115,63 @@ export function useChatRooms() {
   }, [fetchRooms]);
 
   return { rooms, loading, refresh: fetchRooms };
+}
+
+/**
+ * 두 사용자 간의 기존 1:1 채팅방을 찾거나 새로 생성하는 함수
+ * @param otherUserId 상대방 사용자 ID
+ * @returns 채팅방 ID
+ */
+export async function getOrCreateDirectChatRoom(otherUserId: string): Promise<string> {
+  try {
+    const user = await requireCurrentUser();
+
+    // 현재 사용자와 상대방이 모두 속한 채팅방을 검색
+    const { data: roomRows, error } = await supabase
+      .from('chat_room_members')
+      .select('room_id,user_id')
+      .in('user_id', [user.id, otherUserId]);
+
+    if (error) throw error;
+
+    const roomsById = (roomRows || []).reduce<Record<string, Set<string>>>((acc, row: any) => {
+      if (!acc[row.room_id]) acc[row.room_id] = new Set();
+      acc[row.room_id].add(row.user_id);
+      return acc;
+    }, {});
+
+    const directRoomId = Object.entries(roomsById).find(([_, members]) =>
+      members.size === 2 && members.has(user.id) && members.has(otherUserId)
+    )?.[0];
+
+    if (directRoomId) {
+      return directRoomId;
+    }
+
+    return await createNewDirectChatRoom(user.id, otherUserId);
+  } catch (error) {
+    console.error('[채팅방 조회/생성 실패]', error);
+    throw error;
+  }
+}
+
+async function createNewDirectChatRoom(userId: string, otherUserId: string): Promise<string> {
+  const { data: room, error: roomError } = await supabase
+    .from('chat_rooms')
+    .insert({})
+    .select('id')
+    .single();
+  
+  if (roomError) throw roomError;
+  
+  const { error: memberError } = await supabase
+    .from('chat_room_members')
+    .insert([
+      { room_id: room.id, user_id: userId },
+      { room_id: room.id, user_id: otherUserId },
+    ]);
+  
+  if (memberError) throw memberError;
+  
+  return room.id;
 }

@@ -1,12 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert } from 'react-native';
+import { useCallback, useState } from 'react';
 import { supabase } from '../../supabase';
 import { requireCurrentUser, showError } from '../lib/supabaseApi';
-
-export interface GpsPoint {
-  latitude: number;
-  longitude: number;
-}
 
 export interface WalkLog {
   id: string;
@@ -14,123 +8,92 @@ export interface WalkLog {
   dog_id: string;
   distance_km: number;
   duration_sec: number;
-  gps_path: GpsPoint[];
+  gps_path: any; // JSONB
   rating: 'GOOD' | 'BAD';
+  created_at: string;
+  matched_user_id: string | null;
+  matched_dog_id: string | null;
+  is_matched_walk: boolean;
   course_name: string | null;
   is_public: boolean;
-  created_at: string;
 }
 
 export function useWalkLogs() {
-  const [walkLogs, setWalkLogs] = useState<WalkLog[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [markedDates, setMarkedDates] = useState<any>({});
 
-  const fetchWalkLogs = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async () => {
     try {
       const user = await requireCurrentUser();
-      const { data, error } = await supabase
+      const { data } = await supabase.from('walk_logs').select('created_at').eq('user_id', user.id);
+      const marks: any = {};
+      data?.forEach(w => {
+        const key = w.created_at.slice(0, 10);
+        marks[key] = (marks[key] || '') + 'walk_completed ';
+      });
+      setMarkedDates(marks);
+    } catch (e) {}
+  }, []);
+  // 산책 저장 (내 코스에만 저장, 커뮤니티는 수동 공유만)
+  const saveWalkLog = useCallback(async (input: {
+    dog_id: string;
+    distance_km: number;
+    duration_sec: number;
+    gps_path: any;
+    rating?: 'GOOD' | 'BAD';
+    matched_user_id?: string | null;
+    matched_dog_id?: string | null;
+    is_matched_walk?: boolean;
+  }): Promise<WalkLog | null> => {
+    try {
+      const user = await requireCurrentUser();
+
+      // 1. walk_logs 테이블에 저장
+      const { data: walkLog, error: walkError } = await supabase
         .from('walk_logs')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      setWalkLogs((data || []) as WalkLog[]);
+        .insert({
+          user_id: user.id,
+          dog_id: input.dog_id,
+          distance_km: input.distance_km,
+          duration_sec: input.duration_sec,
+          gps_path: input.gps_path,
+          rating: input.rating || 'GOOD',
+          matched_user_id: input.matched_user_id || null,
+          matched_dog_id: input.matched_dog_id || null,
+          is_matched_walk: input.is_matched_walk || false,
+          course_name: `산책 기록 ${new Date().toLocaleDateString('ko-KR')}`,
+          is_public: false,
+        })
+        .select()
+        .single();
+
+      if (walkError) throw walkError;
+
+      // 2. posts 테이블에 자동 저장 (내 코스에만)
+      // 커뮤니티는 사용자가 수동으로 공유할 때만 등록
+      const { error: postError } = await supabase
+        .from('posts')
+        .insert({
+          user_id: user.id,
+          walk_log_id: walkLog.id,
+          course_name: `산책 기록 ${new Date().toLocaleDateString('ko-KR')}`,
+          distance: `${input.distance_km.toFixed(2)}km`,
+          duration: `${Math.floor(input.duration_sec / 60)}분`,
+          gps_path: input.gps_path,
+          content: input.is_matched_walk 
+            ? `${input.matched_user_id}님과 함께한 산책`
+            : '개인 산책',
+          tags: input.is_matched_walk ? ['매칭', '산책'] : ['산책'],
+        });
+
+      if (postError) throw postError;
+
+      return walkLog as WalkLog;
     } catch (error) {
-      showError('산책 기록 불러오기 실패', error);
-    } finally {
-      setLoading(false);
+      showError('산책 저장 실패', error);
+      return null;
     }
   }, []);
 
-  useEffect(() => { fetchWalkLogs(); }, [fetchWalkLogs]);
-
-  // 산책 완료 날짜 마킹 (주황색 — 달력에서 사용)
-  const markedDates = useMemo(() => walkLogs.reduce<Record<string, 'walk'>>((acc, log) => {
-    acc[new Date(log.created_at).toISOString().slice(0, 10)] = 'walk';
-    return acc;
-  }, {}), [walkLogs]);
-
-  // 산책 저장 (선택된 강아지 ID 지원)
-  const saveWalkLog = useCallback(async (
-    distanceKm: number,
-    durationSec: number,
-    gpsPath: GpsPoint[],
-    selectedDogIds?: string[],
-  ) => {
-    if (gpsPath.length < 1) {
-      Alert.alert('저장 불가', '기록할 산책 경로가 없습니다.');
-      return false;
-    }
-
-    try {
-      const user = await requireCurrentUser();
-
-      // 선택된 강아지가 있으면 그 중 첫 번째, 없으면 가장 오래된 강아지
-      let dogId: string | undefined;
-      if (selectedDogIds && selectedDogIds.length > 0) {
-        dogId = selectedDogIds[0];
-      } else {
-        const { data: dogs, error: dogError } = await supabase
-          .from('dogs')
-          .select('id')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: true })
-          .limit(1);
-        if (dogError) throw dogError;
-        dogId = dogs?.[0]?.id;
-      }
-
-      if (!dogId) {
-        Alert.alert('반려견 등록 필요', '산책 기록을 저장하려면 먼저 프로필 탭에서 반려견을 등록해 주세요.');
-        return false;
-      }
-
-      // 산책 시간 포맷 (분 단위)
-      const durationMin = Math.round(durationSec / 60);
-      const durationLabel = durationMin >= 60
-        ? `${Math.floor(durationMin / 60)}시간 ${durationMin % 60}분`
-        : `${durationMin}분`;
-
-      // 자동 코스 이름 생성 (날짜 기반)
-      const now = new Date();
-      const dateStr = `${now.getMonth() + 1}/${now.getDate()}`;
-      const autoCourseName = `${dateStr} 산책 코스 (${distanceKm.toFixed(2)}km)`;
-
-      const { data: walkLogData, error } = await supabase.from('walk_logs').insert({
-        user_id: user.id,
-        dog_id: dogId,
-        distance_km: Number(distanceKm.toFixed(2)),
-        duration_sec: Math.max(1, Math.round(durationSec)),
-        gps_path: gpsPath,
-        rating: 'GOOD',
-        course_name: autoCourseName,
-        is_public: false,
-      }).select('id').single();
-      if (error) throw error;
-
-      // 내 코스(posts 테이블)에도 자동 저장 (커뮤니티 미공개 상태)
-      if (walkLogData?.id) {
-        await supabase.from('posts').insert({
-          user_id: user.id,
-          image_url: null,
-          course_name: autoCourseName,
-          distance: `${distanceKm.toFixed(2)}km`,
-          duration: durationLabel,
-          content: null,
-          tags: [],
-          walk_log_id: walkLogData.id,
-        });
-      }
-
-      await fetchWalkLogs();
-      Alert.alert('산책 완료! 🐾', `${distanceKm.toFixed(2)}km 산책이 기록되었습니다.\n코스 탭의 내 코스에서 확인할 수 있습니다.`);
-      return true;
-    } catch (error) {
-      showError('산책 기록 저장 실패', error);
-      return false;
-    }
-  }, [fetchWalkLogs]);
-
-  return { walkLogs, loading, markedDates, refresh: fetchWalkLogs, saveWalkLog };
+  return { saveWalkLog, loading, markedDates, refresh };
 }

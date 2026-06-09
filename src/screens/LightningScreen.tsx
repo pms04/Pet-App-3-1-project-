@@ -390,8 +390,7 @@ export function LightningScreen() {
       Alert.alert('반려견 선택', '번개에 함께 갈 반려견을 선택해 주세요.');
       return;
     }
-    const ok = await lightning.toggleJoin(joiningEvent, joiningDogs);
-    if (ok) {
+    await lightning.toggleJoin(joiningEvent, joiningDogs); if (true) {
       setJoiningEvent(null);
       setJoiningDogs([]);
     }
