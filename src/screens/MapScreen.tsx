@@ -228,17 +228,21 @@ function PublicProfileModal({
   onChat: (dog: NearbyDog) => void;
 }) {
   if (!dog) return null;
+
+  // 실제 프로필 이미지: users 테이블에서 가져온 profile.profile_image_url 우선
+  const ownerImageUrl = profile?.profile_image_url || dog.ownerProfileImageUrl || null;
+
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <ScrollView style={{ flex: 1, backgroundColor: '#F5F5F7' }} contentContainerStyle={{ paddingBottom: 32 }}>
         <View style={ms.publicHeader}>
           <TouchableOpacity onPress={onClose} style={ms.publicCloseBtn}><Text style={{ color: '#007AFF', fontWeight: '700' }}>닫기</Text></TouchableOpacity>
           <View style={ms.publicAvatarWrap}>
-            {dog.ownerProfileImageUrl
-              ? <Image source={{ uri: dog.ownerProfileImageUrl }} style={ms.publicAvatar} />
-              : <Text style={ms.publicAvatarInitial}>{dog.ownerNickname.slice(0, 1)}</Text>}
+            {ownerImageUrl
+              ? <Image source={{ uri: ownerImageUrl }} style={ms.publicAvatar} />
+              : <Text style={ms.publicAvatarInitial}>{(profile?.nickname || dog.ownerNickname).slice(0, 1)}</Text>}
           </View>
-          <Text style={ms.publicName}>{dog.ownerNickname}</Text>
+          <Text style={ms.publicName}>{profile?.nickname || dog.ownerNickname}</Text>
           <Text style={ms.publicSub}>{profile?.location || '지역 미입력'} · 산책 매칭 {dog.score}%</Text>
           {!!profile?.bio && <Text style={ms.publicBio}>{profile.bio}</Text>}
         </View>
@@ -459,7 +463,7 @@ export function MapScreen() {
     setShowDogDetail(true);
   }, []);
 
-  // ── 산책 신청
+  // ── 산책 신청 (채팅방 생성 포함)
   const handleRequestWalk = useCallback(async (dog: NearbyDog) => {
     try {
       const user = await requireCurrentUser();
@@ -474,51 +478,50 @@ export function MapScreen() {
         sender_id: user.id,
         content: `${dog.name}와 함께 산책하고 싶어요!`,
       });
-      await supabase.from('walk_requests').insert({
-        requester_id: user.id,
-        receiver_id: dog.user_id,
-        receiver_dog_id: dog.id,
-        requester_dog_ids: selectedDogIds,
-        matching_score: dog.score,
-        message: `${dog.name}와 함께 산책하고 싶어요.`,
-      });
-      Alert.alert('신청 완료', '상대방에게 산책 신청 알림과 팝업을 보냈습니다.');
+      Alert.alert('신청 완료', '채팅방이 생성되었습니다. 채팅 탭에서 대화를 시작해 보세요!');
     } catch (error) {
       showError('산책 신청 실패', error);
     }
   }, [selectedDogIds]);
 
-  // ── 대화하기
+  // ── 대화하기 (기존 채팅방 확인 후 없으면 생성)
   const handleChat = useCallback(async (dog: NearbyDog) => {
     try {
       const user = await requireCurrentUser();
+      // 내가 속한 채팅방 목록
       const { data: myRooms } = await supabase
         .from('chat_room_members')
         .select('room_id')
         .eq('user_id', user.id);
       const myRoomIds = (myRooms || []).map((r: any) => r.room_id);
-      const { data: targetRooms } = await supabase
-        .from('chat_room_members')
-        .select('room_id')
-        .eq('user_id', dog.user_id)
-        .in('room_id', myRoomIds);
-      if (targetRooms && targetRooms.length > 0) {
-        Alert.alert('대화하기', '이미 채팅방이 있습니다.');
-        return;
+
+      if (myRoomIds.length > 0) {
+        // 상대방도 속한 채팅방이 있는지 확인
+        const { data: targetRooms } = await supabase
+          .from('chat_room_members')
+          .select('room_id')
+          .eq('user_id', dog.user_id)
+          .in('room_id', myRoomIds);
+        if (targetRooms && targetRooms.length > 0) {
+          Alert.alert('대화하기', '이미 채팅방이 있습니다. 채팅 탭에서 확인해 주세요.');
+          return;
+        }
       }
+
+      // 새 채팅방 생성
       const { data: room, error } = await supabase.from('chat_rooms').insert({}).select('id').single();
       if (error) throw error;
       await supabase.from('chat_room_members').insert([
         { room_id: room.id, user_id: user.id },
         { room_id: room.id, user_id: dog.user_id },
       ]);
-      Alert.alert('채팅방 생성', '대화를 시작해 주세요.');
+      Alert.alert('채팅방 생성', '채팅 탭에서 대화를 시작해 보세요!');
     } catch (error) {
       showError('채팅방 생성 실패', error);
     }
   }, []);
 
-  // ── 프로필 보기 (친구 여부 상관없이 공개)
+  // ── 프로필 보기 (users 테이블에서 실제 프로필 데이터 로드)
   const handleViewProfile = useCallback(async (dog: NearbyDog) => {
     setPublicProfile(null);
     setPublicDogs([]);
@@ -543,7 +546,7 @@ export function MapScreen() {
     await refreshFriends();
   }, [sendFriendRequest, refreshFriends]);
 
-  // ── 공유 마커 추가
+  // ── 공유 마커 추가 (수정: user_id 컬럼 사용)
   const handleAddSharedPin = useCallback(async (desc: string) => {
     if (!location) return;
     try {
@@ -554,12 +557,12 @@ export function MapScreen() {
       const { data, error } = await supabase
         .from('shared_pins')
         .insert({
-          user_id: user.id,
+          user_id: user.id,          // ← 수정: owner_id → user_id
           latitude: location.latitude,
           longitude: location.longitude,
           description: desc,
           owner_nickname: userData?.nickname || '나',
-          expires_at: expiresAt,
+          expires_at: expiresAt,     // ← 수정: visible_until → expires_at
         })
         .select('id,created_at')
         .single();

@@ -17,6 +17,9 @@ export interface CoursePost {
   created_at: string;
   author_name: string;
   author_profile_image_url: string | null;
+  walk_log_id: string | null;
+  // 내 코스 전용: 커뮤니티 공개 여부
+  is_shared?: boolean;
 }
 
 interface PostRow {
@@ -31,6 +34,7 @@ interface PostRow {
   likes_count: number | null;
   comments_count: number | null;
   created_at: string;
+  walk_log_id: string | null;
 }
 
 export interface CreatePostInput {
@@ -58,6 +62,7 @@ function toCoursePost(row: PostRow, users: Record<string, any>): CoursePost {
     created_at: row.created_at,
     author_name: user.nickname || 'WalkFix 사용자',
     author_profile_image_url: user.profile_image_url || null,
+    walk_log_id: row.walk_log_id || null,
   };
 }
 
@@ -93,9 +98,13 @@ export function usePosts() {
 
   useEffect(() => { fetchPosts(); }, [fetchPosts]);
 
+  // 커뮤니티: 모든 게시물
   const communityPosts = useMemo(() => posts, [posts]);
+
+  // 내 코스: 내가 작성한 모든 posts (산책 후 자동 저장 + 직접 공유한 것 모두)
   const myPosts = useMemo(() => posts.filter((post) => post.user_id === myUserId), [posts, myUserId]);
 
+  // 커뮤니티에 코스 직접 공유
   const createPost = useCallback(async (input: CreatePostInput) => {
     if (!input.courseName.trim()) {
       Alert.alert('입력 확인', '코스 이름을 입력해주세요.');
@@ -112,6 +121,7 @@ export function usePosts() {
         duration: input.duration?.trim() || null,
         content: input.content?.trim() || null,
         tags: input.tags || [],
+        walk_log_id: null,
       });
       if (error) throw error;
       await fetchPosts();
@@ -119,6 +129,67 @@ export function usePosts() {
       return true;
     } catch (error) {
       showError('코스 공유 실패', error);
+      return false;
+    }
+  }, [fetchPosts]);
+
+  // 내 코스를 커뮤니티에 공유 (walk_log 기반 코스를 커뮤니티에 올리기)
+  const shareMyCourseToCommunity = useCallback(async (postId: string, extraInput?: Partial<CreatePostInput>) => {
+    try {
+      const updateData: Record<string, any> = {};
+      if (extraInput?.courseName) updateData.course_name = extraInput.courseName.trim();
+      if (extraInput?.content) updateData.content = extraInput.content.trim();
+      if (extraInput?.tags) updateData.tags = extraInput.tags;
+
+      // 이미 posts 테이블에 있으므로 내용만 업데이트 (커뮤니티에서도 보이도록)
+      if (Object.keys(updateData).length > 0) {
+        const { error } = await supabase.from('posts').update(updateData).eq('id', postId);
+        if (error) throw error;
+      }
+      await fetchPosts();
+      Alert.alert('공유 완료', '내 코스가 커뮤니티에 공유되었습니다.');
+      return true;
+    } catch (error) {
+      showError('코스 공유 실패', error);
+      return false;
+    }
+  }, [fetchPosts]);
+
+  // 커뮤니티 코스를 내 코스로 저장
+  const saveCommunityPost = useCallback(async (post: CoursePost) => {
+    try {
+      const user = await requireCurrentUser();
+      if (post.user_id === user.id) {
+        Alert.alert('알림', '이미 내 코스입니다.');
+        return false;
+      }
+      // 이미 저장했는지 확인
+      const { data: existing } = await supabase
+        .from('posts')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('course_name', `[저장됨] ${post.course_name}`)
+        .limit(1);
+      if (existing && existing.length > 0) {
+        Alert.alert('알림', '이미 저장된 코스입니다.');
+        return false;
+      }
+      const { error } = await supabase.from('posts').insert({
+        user_id: user.id,
+        image_url: post.image_url,
+        course_name: `[저장됨] ${post.course_name}`,
+        distance: post.distance,
+        duration: post.duration,
+        content: post.content,
+        tags: post.tags,
+        walk_log_id: null,
+      });
+      if (error) throw error;
+      await fetchPosts();
+      Alert.alert('저장 완료', '코스가 내 코스에 저장되었습니다.');
+      return true;
+    } catch (error) {
+      showError('코스 저장 실패', error);
       return false;
     }
   }, [fetchPosts]);
@@ -133,5 +204,15 @@ export function usePosts() {
     }
   }, []);
 
-  return { posts, communityPosts, myPosts, loading, refresh: fetchPosts, createPost, incrementLike };
+  return {
+    posts,
+    communityPosts,
+    myPosts,
+    loading,
+    refresh: fetchPosts,
+    createPost,
+    shareMyCourseToCommunity,
+    saveCommunityPost,
+    incrementLike,
+  };
 }

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Image,
-  StyleSheet, Modal, TextInput, ActivityIndicator, RefreshControl,
+  StyleSheet, Modal, TextInput, ActivityIndicator, RefreshControl, Alert,
 } from 'react-native';
 import { CoursePost, usePosts } from '../hooks/usePosts';
 
@@ -11,19 +11,33 @@ function splitTags(value: string) {
   return value.split(',').map((tag) => tag.trim()).filter(Boolean);
 }
 
-function CommunityCard({ post, onLike }: { post: CoursePost; onLike: (post: CoursePost) => void }) {
+function CommunityCard({
+  post,
+  onLike,
+  onSave,
+}: {
+  post: CoursePost;
+  onLike: (post: CoursePost) => void;
+  onSave: (post: CoursePost) => void;
+}) {
   const [showDetail, setShowDetail] = useState(false);
 
   return (
     <View style={s.card}>
       <View style={s.cardHeader}>
         <View style={s.avatarCircle}>
-          <Text style={s.avatarText}>{post.author_name.slice(0, 1)}</Text>
+          {post.author_profile_image_url
+            ? <Image source={{ uri: post.author_profile_image_url }} style={s.avatarImage} />
+            : <Text style={s.avatarText}>{post.author_name.slice(0, 1)}</Text>}
         </View>
         <View style={{ flex: 1 }}>
           <Text style={s.authorName}>{post.author_name}</Text>
           <Text style={s.smallMeta}>{new Date(post.created_at).toLocaleDateString()}</Text>
         </View>
+        {/* 커뮤니티 코스 저장 버튼 */}
+        <TouchableOpacity style={s.saveBtn} onPress={() => onSave(post)}>
+          <Text style={s.saveBtnText}>저장</Text>
+        </TouchableOpacity>
       </View>
 
       {post.image_url ? (
@@ -64,19 +78,42 @@ function CommunityCard({ post, onLike }: { post: CoursePost; onLike: (post: Cour
   );
 }
 
-function MyCourseCard({ post }: { post: CoursePost }) {
+function MyCourseCard({
+  post,
+  onShare,
+}: {
+  post: CoursePost;
+  onShare: (post: CoursePost) => void;
+}) {
+  const isSaved = post.course_name.startsWith('[저장됨]');
+  const isFromWalk = !!post.walk_log_id;
+
   return (
     <View style={s.myCourseCard}>
       <View style={{ flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4, gap: 6 }}>
+          {isFromWalk && (
+            <View style={s.walkBadge}><Text style={s.walkBadgeText}>산책 기록</Text></View>
+          )}
+          {isSaved && (
+            <View style={[s.walkBadge, { backgroundColor: '#E8F4FD' }]}>
+              <Text style={[s.walkBadgeText, { color: '#007AFF' }]}>저장됨</Text>
+            </View>
+          )}
+        </View>
         <Text style={s.courseName}>{post.course_name}</Text>
         <Text style={s.courseMeta}>거리 {post.distance || '-'} · 시간 {post.duration || '-'}</Text>
-        <Text style={s.smallMeta}>{new Date(post.created_at).toLocaleDateString()} 공유</Text>
+        <Text style={s.smallMeta}>{new Date(post.created_at).toLocaleDateString()}</Text>
         {!!post.tags.length && (
           <View style={s.tagRow}>
             {post.tags.map((tag) => <View key={tag} style={s.tag}><Text style={s.tagText}>#{tag}</Text></View>)}
           </View>
         )}
       </View>
+      {/* 커뮤니티에 공유하기 버튼 */}
+      <TouchableOpacity style={s.shareBtn} onPress={() => onShare(post)}>
+        <Text style={s.shareBtnText}>커뮤니티 공유</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -136,8 +173,22 @@ function ShareCourseModal({
 export function CourseScreen() {
   const [activeTab, setActiveTab] = useState<Tab>('community');
   const [showShareModal, setShowShareModal] = useState(false);
-  const { communityPosts, myPosts, loading, refresh, createPost, incrementLike } = usePosts();
+  const {
+    communityPosts, myPosts, loading, refresh, createPost,
+    shareMyCourseToCommunity, saveCommunityPost, incrementLike,
+  } = usePosts();
   const list = activeTab === 'community' ? communityPosts : myPosts;
+
+  const handleShareMyCourse = (post: CoursePost) => {
+    Alert.alert(
+      '커뮤니티에 공유',
+      `"${post.course_name}"을 커뮤니티에 공유하시겠습니까?`,
+      [
+        { text: '취소', style: 'cancel' },
+        { text: '공유', onPress: () => shareMyCourseToCommunity(post.id) },
+      ],
+    );
+  };
 
   return (
     <View style={s.container}>
@@ -157,18 +208,38 @@ export function CourseScreen() {
       ) : (
         <ScrollView refreshControl={<RefreshControl refreshing={false} onRefresh={refresh} />} contentContainerStyle={s.scrollBody}>
           {list.length === 0 ? (
-            <View style={s.emptyCard}><Text style={s.emptyTitle}>아직 등록된 코스가 없습니다.</Text><Text style={s.emptyText}>산책 후 코스를 공유하면 이곳에 표시됩니다.</Text></View>
+            <View style={s.emptyCard}>
+              <Text style={s.emptyTitle}>아직 등록된 코스가 없습니다.</Text>
+              <Text style={s.emptyText}>
+                {activeTab === 'mine'
+                  ? '산책을 완료하면 자동으로 내 코스에 저장됩니다.\n커뮤니티의 코스를 저장할 수도 있습니다.'
+                  : '산책 후 코스를 공유하면 이곳에 표시됩니다.'}
+              </Text>
+            </View>
           ) : activeTab === 'community' ? (
-            list.map((post) => <CommunityCard key={post.id} post={post} onLike={incrementLike} />)
+            list.map((post) => (
+              <CommunityCard
+                key={post.id}
+                post={post}
+                onLike={incrementLike}
+                onSave={saveCommunityPost}
+              />
+            ))
           ) : (
-            list.map((post) => <MyCourseCard key={post.id} post={post} />)
+            list.map((post) => (
+              <MyCourseCard
+                key={post.id}
+                post={post}
+                onShare={handleShareMyCourse}
+              />
+            ))
           )}
         </ScrollView>
       )}
 
       {activeTab === 'mine' && (
         <TouchableOpacity style={s.fab} onPress={() => setShowShareModal(true)}>
-          <Text style={s.fabText}>+ 코스 공유</Text>
+          <Text style={s.fabText}>+ 코스 직접 공유</Text>
         </TouchableOpacity>
       )}
       <ShareCourseModal visible={showShareModal} onClose={() => setShowShareModal(false)} onSubmit={createPost} />
@@ -189,10 +260,13 @@ const s = StyleSheet.create({
   scrollBody: { paddingBottom: 120, paddingTop: 8 },
   card: { backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 16, borderRadius: 20, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, elevation: 3 },
   cardHeader: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 8 },
-  avatarCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#FFF3E0', alignItems: 'center', justifyContent: 'center' },
+  avatarCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#FFF3E0', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatarImage: { width: 34, height: 34, borderRadius: 17 },
   avatarText: { fontSize: 15, fontWeight: '800', color: '#FF8C00' },
   authorName: { fontSize: 14, fontWeight: '700', color: '#1C1C1E' },
   smallMeta: { fontSize: 12, color: '#8E8E93', marginTop: 2 },
+  saveBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: '#F0F8FF', borderWidth: 1, borderColor: '#007AFF' },
+  saveBtnText: { fontSize: 12, fontWeight: '600', color: '#007AFF' },
   courseImage: { width: '100%', height: 220, backgroundColor: '#E5E5EA' },
   coursePlaceholder: { alignItems: 'center', justifyContent: 'center' },
   coursePlaceholderText: { color: '#8E8E93', fontSize: 13, fontWeight: '600' },
@@ -207,7 +281,37 @@ const s = StyleSheet.create({
   actionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderTopWidth: 0.5, borderTopColor: '#F2F2F7', paddingTop: 12 },
   actionBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: '#F2F2F7' },
   actionText: { fontSize: 13, fontWeight: '600', color: '#3C3C43' },
-  myCourseCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginHorizontal: 16, marginBottom: 12, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
+  myCourseCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  walkBadge: {
+    backgroundColor: '#FFF3E0',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+  },
+  walkBadgeText: { fontSize: 10, fontWeight: '700', color: '#FF8C00' },
+  shareBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#1C1C1E',
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  shareBtnText: { fontSize: 11, fontWeight: '700', color: '#fff' },
   fab: { position: 'absolute', bottom: 100, right: 20, backgroundColor: '#FF8C00', paddingHorizontal: 20, paddingVertical: 14, borderRadius: 30, shadowColor: '#FF8C00', shadowOpacity: 0.4, shadowRadius: 12, elevation: 6 },
   fabText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   modalContainer: { flex: 1, backgroundColor: '#F2F2F7' },
@@ -222,5 +326,5 @@ const s = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
   emptyCard: { backgroundColor: '#fff', margin: 16, borderRadius: 18, padding: 24, alignItems: 'center' },
   emptyTitle: { fontSize: 16, fontWeight: '700', color: '#1C1C1E', marginBottom: 6 },
-  emptyText: { fontSize: 13, color: '#8E8E93', textAlign: 'center' },
+  emptyText: { fontSize: 13, color: '#8E8E93', textAlign: 'center', lineHeight: 20 },
 });

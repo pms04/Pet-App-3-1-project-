@@ -124,11 +124,13 @@ export function useNearbyDogs(
           return;
         }
 
-        // 각 위치의 사용자 강아지 정보 조회
+        // 각 위치의 사용자 강아지 정보 조회 (users 테이블 join으로 실제 프로필 이미지 가져오기)
         const userIds = locations.map((l: any) => l.user_id);
+
+        // 강아지 정보 + users 테이블 join
         const { data: dogsData } = await supabase
           .from('dogs')
-          .select('*, users(id,nickname,profile_image_url)')
+          .select('*, users(id,nickname,profile_image_url,bio,location)')
           .in('user_id', userIds);
 
         const result: NearbyDog[] = [];
@@ -142,7 +144,11 @@ export function useNearbyDogs(
           for (const dog of visibleDogs) {
             const profile = toProfile(dog);
             const compat = baseProfile ? calcCompatScore(baseProfile, profile) : { score: 0, grade: 'danger' as const };
-            const { avatarUri } = decodeTendency(dog.tendency);
+
+            // 실제 프로필 이미지: users.profile_image_url 우선 사용
+            // tendency 아바타는 강아지 아바타용으로만 사용하고, 사람 프로필에는 사용하지 않음
+            const ownerProfileImageUrl = dog.users?.profile_image_url || null;
+
             result.push({
               id: dog.id,
               user_id: dog.user_id,
@@ -156,7 +162,7 @@ export function useNearbyDogs(
               latitude: loc.latitude,
               longitude: loc.longitude,
               ownerNickname: dog.users?.nickname || 'WalkFix 사용자',
-              ownerProfileImageUrl: dog.users?.profile_image_url || avatarUri || null,
+              ownerProfileImageUrl,  // ← 수정: tendency avatarUri fallback 제거
               score: compat.score,
               grade: compat.grade,
               isWalking: true,

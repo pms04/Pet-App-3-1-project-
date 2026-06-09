@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  Alert, ScrollView, KeyboardAvoidingView, Platform,
+  Alert, ScrollView, KeyboardAvoidingView, Platform, StyleSheet,
 } from 'react-native';
 import { supabase } from '../../supabase';
-import { styles } from '../styles/styles';
+import { styles, T } from '../styles/styles';
 
 // ──────────────────────────────────────────────────────────────
 // AuthScreen — 스티브 잡스 미니멀 디자인 + 소셜 로그인 UI
+// 수정: 카카오/구글 버튼 가로 배치, 아이콘(이모지) 제거
 // ──────────────────────────────────────────────────────────────
 export function AuthScreen() {
   const [email, setEmail] = useState('');
@@ -48,8 +49,6 @@ export function AuthScreen() {
   };
 
   const handleSocialLogin = (provider: 'kakao' | 'google') => {
-    // Expo/React Native 환경에서는 Supabase OAuth + WebBrowser 플로우 필요
-    // 실제 연동 시 expo-auth-session 또는 expo-web-browser 사용
     Alert.alert(
       provider === 'kakao' ? '카카오 로그인' : 'Google 로그인',
       `${provider === 'kakao' ? '카카오' : 'Google'} 계정으로 로그인하려면 Supabase 대시보드에서 해당 OAuth Provider를 활성화한 뒤 앱을 재빌드해 주세요.\n\n(현재 개발 환경에서는 이메일 로그인을 이용해 주세요.)`,
@@ -75,24 +74,24 @@ export function AuthScreen() {
           {isSignUp ? '반려견과 함께하는 새로운 산책 시작하기' : '반려견 실시간 매칭 & 산책 커뮤니티'}
         </Text>
 
-        {/* 소셜 로그인 */}
-        <TouchableOpacity
-          style={[styles.authSocialButton, styles.authKakaoButton]}
-          onPress={() => handleSocialLogin('kakao')}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.authSocialIcon}>💬</Text>
-          <Text style={[styles.authSocialText, { color: '#3C1E1E' }]}>카카오로 계속하기</Text>
-        </TouchableOpacity>
+        {/* 소셜 로그인 — 가로 배치, 아이콘 없음 */}
+        <View style={authS.socialRow}>
+          <TouchableOpacity
+            style={[authS.socialBtn, authS.kakaoBtn]}
+            onPress={() => handleSocialLogin('kakao')}
+            activeOpacity={0.8}
+          >
+            <Text style={[authS.socialBtnText, { color: '#3C1E1E' }]}>카카오로 계속하기</Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.authSocialButton, styles.authGoogleButton]}
-          onPress={() => handleSocialLogin('google')}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.authSocialIcon}>🔵</Text>
-          <Text style={styles.authSocialText}>Google로 계속하기</Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[authS.socialBtn, authS.googleBtn]}
+            onPress={() => handleSocialLogin('google')}
+            activeOpacity={0.8}
+          >
+            <Text style={authS.socialBtnText}>Google로 계속하기</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* 구분선 */}
         <View style={styles.authDividerRow}>
@@ -151,3 +150,34 @@ export function AuthScreen() {
     </KeyboardAvoidingView>
   );
 }
+
+// 소셜 버튼 전용 스타일 (가로 배치)
+const authS = StyleSheet.create({
+  socialRow: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 10,
+    marginBottom: 4,
+  },
+  socialBtn: {
+    flex: 1,
+    height: 52,
+    borderRadius: T.r16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  kakaoBtn: {
+    backgroundColor: '#FEE500',
+    borderColor: '#FEE500',
+  },
+  googleBtn: {
+    backgroundColor: T.white,
+    borderColor: T.fill2,
+  },
+  socialBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: T.label1,
+  },
+});

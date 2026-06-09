@@ -16,6 +16,8 @@ export interface WalkLog {
   duration_sec: number;
   gps_path: GpsPoint[];
   rating: 'GOOD' | 'BAD';
+  course_name: string | null;
+  is_public: boolean;
   created_at: string;
 }
 
@@ -84,17 +86,45 @@ export function useWalkLogs() {
         return false;
       }
 
-      const { error } = await supabase.from('walk_logs').insert({
+      // 산책 시간 포맷 (분 단위)
+      const durationMin = Math.round(durationSec / 60);
+      const durationLabel = durationMin >= 60
+        ? `${Math.floor(durationMin / 60)}시간 ${durationMin % 60}분`
+        : `${durationMin}분`;
+
+      // 자동 코스 이름 생성 (날짜 기반)
+      const now = new Date();
+      const dateStr = `${now.getMonth() + 1}/${now.getDate()}`;
+      const autoCourseName = `${dateStr} 산책 코스 (${distanceKm.toFixed(2)}km)`;
+
+      const { data: walkLogData, error } = await supabase.from('walk_logs').insert({
         user_id: user.id,
         dog_id: dogId,
         distance_km: Number(distanceKm.toFixed(2)),
         duration_sec: Math.max(1, Math.round(durationSec)),
         gps_path: gpsPath,
         rating: 'GOOD',
-      });
+        course_name: autoCourseName,
+        is_public: false,
+      }).select('id').single();
       if (error) throw error;
+
+      // 내 코스(posts 테이블)에도 자동 저장 (커뮤니티 미공개 상태)
+      if (walkLogData?.id) {
+        await supabase.from('posts').insert({
+          user_id: user.id,
+          image_url: null,
+          course_name: autoCourseName,
+          distance: `${distanceKm.toFixed(2)}km`,
+          duration: durationLabel,
+          content: null,
+          tags: [],
+          walk_log_id: walkLogData.id,
+        });
+      }
+
       await fetchWalkLogs();
-      Alert.alert('산책 완료! 🐾', `${distanceKm.toFixed(2)}km 산책이 기록되었습니다.\n달력에서 오늘 산책 기록을 확인할 수 있습니다.`);
+      Alert.alert('산책 완료! 🐾', `${distanceKm.toFixed(2)}km 산책이 기록되었습니다.\n코스 탭의 내 코스에서 확인할 수 있습니다.`);
       return true;
     } catch (error) {
       showError('산책 기록 저장 실패', error);
