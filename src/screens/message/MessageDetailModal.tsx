@@ -80,15 +80,29 @@ export function MessageDetailModal({ visible, room, onClose }: Props) {
       
       const enrichedMessages: Message[] = [];
       for (const msg of (data || [])) {
-        const { data: senderData } = await supabase
-          .from('users')
-          .select('nickname,profile_image_url')
-          .eq('id', msg.sender_id)
-          .single();
+        let sender_nickname = '사용자';
+        let sender_profile_image_url = null;
+
+        if (msg.sender_id === myUserId) {
+          sender_nickname = myNickname;
+          sender_profile_image_url = myProfileImageUrl;
+        } else if (room.other_user_id === msg.sender_id) {
+          sender_nickname = room.other_user_nickname;
+          sender_profile_image_url = room.other_user_profile_image_url;
+        } else {
+          const { data: senderData } = await supabase
+            .from('users')
+            .select('nickname,profile_image_url')
+            .eq('id', msg.sender_id)
+            .single();
+          sender_nickname = senderData?.nickname || '사용자';
+          sender_profile_image_url = senderData?.profile_image_url || null;
+        }
+
         enrichedMessages.push({
           ...msg,
-          sender_nickname: senderData?.nickname || '사용자',
-          sender_profile_image_url: senderData?.profile_image_url || null,
+          sender_nickname,
+          sender_profile_image_url,
         });
         messageIdsRef.current.add(msg.id);
       }
@@ -98,7 +112,7 @@ export function MessageDetailModal({ visible, room, onClose }: Props) {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [room]);
+  }, [room, myNickname, myProfileImageUrl, myUserId]);
 
   // ── Realtime 구독 (메시지 실시간 수신)
   useEffect(() => {
