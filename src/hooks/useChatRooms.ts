@@ -36,7 +36,7 @@ export function useChatRooms() {
 
       const { data: memberRows } = await supabase
         .from('chat_room_members')
-        .select('room_id,user_id,users(id,nickname,profile_image_url)')
+        .select('room_id,user_id')
         .in('room_id', roomIds);
       const { data: messages } = await supabase
         .from('messages')
@@ -68,16 +68,18 @@ export function useChatRooms() {
         return acc;
       }, {});
 
-      setRooms(roomIds.map((roomId) => {
+      const roomList: Array<ChatRoomPreview & { latestTimestamp: number }> = roomIds.map((roomId) => {
         const members = membersByRoom[roomId] || [];
         const otherMembers = members.filter((member) => member.user_id !== user.id);
-        const names = otherMembers.map((member) => member.users?.nickname).filter(Boolean);
+        const otherUserId = otherMembers[0]?.user_id;
+        const otherUser = otherUserId ? otherUsersById[otherUserId] : null;
+        const otherNickname = otherUser?.nickname || '상대방';
+        const otherProfileImageUrl = otherUser?.profile_image_url || null;
+        const names = otherMembers
+          .map((member) => otherUsersById[member.user_id]?.nickname)
+          .filter(Boolean);
         const latest = latestByRoom.get(roomId);
-        const firstOther = otherMembers[0];
-        const dbNickname = firstOther?.users?.nickname || otherUsersById[firstOther?.user_id || '']?.nickname;
-        const dbProfileImage = firstOther?.users?.profile_image_url || otherUsersById[firstOther?.user_id || '']?.profile_image_url;
-        const otherNickname = dbNickname || (names[0] || '상대방');
-        const otherProfileImageUrl = dbProfileImage || null;
+        const latestTimestamp = latest?.created_at ? new Date(latest.created_at).getTime() : 0;
         
         const displayName = otherMembers.length === 1
           ? otherNickname
@@ -90,11 +92,15 @@ export function useChatRooms() {
           time: formatTime(latest?.created_at),
           unread: 0,
           type: otherMembers.length > 1 ? 'group' : 'direct',
-          other_user_id: firstOther?.user_id || null,
+          other_user_id: otherUserId || null,
           other_user_nickname: otherNickname,
           other_user_profile_image_url: otherProfileImageUrl,
+          latestTimestamp,
         };
-      }));
+      });
+
+      roomList.sort((a, b) => b.latestTimestamp - a.latestTimestamp);
+      setRooms(roomList.map(({ latestTimestamp, ...room }) => room));
     } catch (error) {
       console.warn('[대화방 불러오기 실패]', error);
       setRooms([]);
@@ -160,21 +166,7 @@ export async function getOrCreateDirectChatRoom(otherUserId: string): Promise<st
     ).map(([roomId]) => roomId);
 
     if (candidateRoomIds.length > 0) {
-      const { data: allMembers, error: membersError } = await supabase
-        .from('chat_room_members')
-        .select('room_id')
-        .in('room_id', candidateRoomIds);
-      if (membersError) throw membersError;
-
-      const memberCountByRoom = (allMembers || []).reduce<Record<string, number>>((acc, row: any) => {
-        acc[row.room_id] = (acc[row.room_id] || 0) + 1;
-        return acc;
-      }, {});
-
-      const existingDirectRoomId = candidateRoomIds.find((roomId) => memberCountByRoom[roomId] === 2);
-      if (existingDirectRoomId) {
-        return existingDirectRoomId;
-      }
+      return candidateRoomIds[0];
     }
 
     return await createNewDirectChatRoom(user.id, otherUserId);
